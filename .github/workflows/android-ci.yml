@@ -198,6 +198,9 @@ jobs:
     needs: detect
     if: needs.detect.outputs.has_android == 'true'
     runs-on: ubuntu-latest
+    # A stuck Gradle build must fail in bounded time rather than occupy a runner.
+    # The real build takes ~2 minutes; 25 leaves room for cold caches.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,6 +214,20 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+
+      # AGP can download missing SDK packages itself, but that path can block on a
+      # licence prompt with no terminal and hang the job indefinitely. Installing
+      # the exact packages up front makes the build deterministic and fails fast
+      # and loudly if a version is unavailable.
+      #
+      # Note the platform is android-37.0, not android-37: current platforms carry
+      # a minor version. `sdkmanager --list | grep platforms` shows what exists.
+      - name: Install required Android SDK packages
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
+          echo "$ANDROID_HOME/build-tools/37.0.0" >> "$GITHUB_PATH"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
