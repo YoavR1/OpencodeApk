@@ -1,6 +1,8 @@
 package ai.opencode.android.web
 
 import android.content.Context
+import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -24,13 +26,13 @@ import ai.opencode.android.util.SafeLog
  */
 object WebViewHost {
 
-    fun configure(webView: WebView, context: Context) {
+    fun configure(webView: WebView, context: Context, onRendererGone: () -> Unit) {
         val loader = WebViewAssetLoader.Builder()
             .setDomain(WebOrigin.DOMAIN)
             .addPathHandler(WebOrigin.ASSET_PATH, WebViewAssetLoader.AssetsPathHandler(context))
             .build()
 
-        webView.webViewClient = AssetClient(loader)
+        webView.webViewClient = AssetClient(loader, onRendererGone)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -59,7 +61,17 @@ object WebViewHost {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     }
 
-    private class AssetClient(private val loader: WebViewAssetLoader) : WebViewClient() {
+    // Lint's MissingOnRenderProcessGone check does not resolve the override below
+    // on this Kotlin declaration and reports it as missing. The Kotlin compiler
+    // accepts `override`, which only succeeds if the method genuinely binds to
+    // WebViewClient.onRenderProcessGone, so the check is wrong here rather than
+    // being satisfied by suppression. Re-test on future AGP versions and remove
+    // this if it starts resolving.
+    @Suppress("MissingOnRenderProcessGone")
+    private class AssetClient(
+        private val loader: WebViewAssetLoader,
+        private val onRendererGone: () -> Unit,
+    ) : WebViewClient() {
 
         override fun shouldInterceptRequest(
             view: WebView,
@@ -76,6 +88,25 @@ object WebViewHost {
             // External navigation is not part of M2. Opening it in the browser is
             // the Platform.openExternal contract and lands with the bridge in M4.
             SafeLog.w("blocked off-origin navigation")
+            return true
+        }
+
+        /**
+         * The WebView renderer runs in its own process and can be killed
+         * independently — by a crash, or by the system reclaiming memory. Without
+         * this override the framework kills the whole app when that happens.
+         *
+         * Returning `true` claims the event so the app survives. The WebView
+         * itself is unusable afterwards, so it is detached and the host is asked
+         * to rebuild it.
+         *
+         * Crash-loop backoff is deliberately not implemented here; that belongs
+         * with the rest of the resilience work in M9.
+         */
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            SafeLog.e("WebView render process gone (didCrash=${detail.didCrash()})")
+            (view.parent as? ViewGroup)?.removeView(view)
+            onRendererGone()
             return true
         }
     }

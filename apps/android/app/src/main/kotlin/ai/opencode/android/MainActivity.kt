@@ -33,7 +33,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.web_view)
-        WebViewHost.configure(webView, applicationContext)
+        WebViewHost.configure(webView, applicationContext) {
+            // The renderer died. The Activity rebuilds itself with a fresh WebView.
+            if (!isFinishing && !isDestroyed) recreate()
+        }
 
         applyInsets()
         registerBackHandling()

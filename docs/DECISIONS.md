@@ -327,22 +327,98 @@ build time and is git-ignored.
 
 ## ADR-0011 — Android toolchain and API levels
 
-- **Date:** 2026-08-18 · **Milestone:** M1 · **Status:** Accepted (revisit `minSdk` at M6)
+- **Date:** 2026-08-18 · **Milestone:** M1, **corrected in M2 by CI evidence** · **Status:** Accepted
+
+**The M1 version of this ADR was wrong and CI proved it.** It chose AGP 8.13.2 on
+the reasoning that the AGP 9.x DSL could not be validated from a cloud session
+without an Android SDK, and that a green CI build mattered more than being
+current. The first real build failed at `CheckAarMetadata`:
+
+```
+1. Dependency 'androidx.core:core:1.19.0' requires libraries and applications that
+   depend on it to compile against version 37 or later of the Android APIs.
+   :app is currently compiled against android-36.
+2. Dependency 'androidx.core:core:1.19.0' requires Android Gradle plugin 9.1.0 or higher.
+   This build currently uses Android Gradle plugin 8.13.2.
+```
+
+The current androidx line *requires* AGP 9.1+. Staying on AGP 8.x would have meant
+pinning deliberately older libraries on a brand-new project and migrating anyway —
+later, during M7, when the build carries native libraries and packaging rules and
+the migration is far more expensive.
 
 **Decision.**
 
 | Setting | Value | Reason |
 |---|---|---|
-| JDK | **21** | Already provisioned in CI and present in cloud sessions (`openjdk 21.0.10`). |
-| Gradle | **8.14.3+** via committed wrapper | Matches the version available locally; the wrapper is the source of truth. |
-| AGP | **8.x**, latest stable compatible with the wrapper | |
-| Kotlin | latest stable supported by the chosen AGP | |
-| `compileSdk` / `targetSdk` | **36** | Stay current; Play requires a recent target and W^X behaviour is already in force. |
-| `minSdk` | **26** (Android 8.0) | Modern process, filesystem, and notification-channel behaviour. Below 26 the foreground-service and notification model diverges enough to cost real complexity. |
-| Primary ABI | **`arm64-v8a`** | Real devices. `x86_64` may be added for emulator CI only. |
+| AGP | **9.3.1** | Required by androidx.core 1.19.0; latest stable |
+| Gradle | **9.7.0** via committed wrapper | AGP 9.3.1 needs Gradle 9.x APIs — proven locally: under Gradle 8.14.3 it fails with `NoClassDefFoundError: org/gradle/features/binding/ProjectTypeBinding` |
+| Kotlin plugin | **none** | AGP 9 ships built-in Kotlin. Applying `org.jetbrains.kotlin.android` is a hard error: *"no longer required for Kotlin support since AGP 9.0"* |
+| JDK | **21** | Provisioned in CI and present in cloud sessions |
+| `compileSdk` | **37** | Demanded by androidx.core 1.19.0 |
+| `targetSdk` | **36** | Deliberately one behind. `targetSdk` opts into runtime behaviour changes this project has not tested; Google's own guidance separates the two. Lint's `OldTargetApi` warning is the accepted, visible cost |
+| `minSdk` | **26** (Android 8.0) | Modern process, filesystem and notification-channel behaviour |
+| Primary ABI | **`arm64-v8a`** | Real devices. `x86_64` may be added for emulator CI only |
 
-**Note.** `minSdk` may need to rise if M6's runtime choice requires it. That is a
-legitimate reason to revisit; reach is not.
+**Consequences.**
+
+- `android.nonTransitiveRClass` is not set — AGP 9 removed the flag.
+- `kotlinOptions` and a `kotlin { compilerOptions }` block are both absent; AGP 9's
+  built-in Kotlin owns that configuration.
+- `lint.htmlReport` / `xmlReport` are not set — AGP 9 always generates reports and
+  the setters are deprecated. Lint now emits HTML and SARIF.
+- `minSdk` may still need to rise if M6's runtime choice requires it. Reach is not
+  a reason to revisit; the runtime is.
+
+**Process note.** The M1 reasoning — "avoid what cannot be validated locally" — was
+sound in itself but was applied to a question that only a real build could answer.
+The fix was to make local validation possible: the Android SDK command-line tools
+were installed in the session so the build could be iterated in seconds instead of
+CI rounds. `docs/CLAUDE_CLOUD_SETUP.md` previously discouraged that; it has been
+amended to distinguish *shortening a real debug loop* (worthwhile) from *manufacturing
+local green output in place of CI* (still discouraged).
+
+---
+
+## ADR-0012 — Vendoring upstream moves from M2 to M3
+
+- **Date:** 2026-08-18 · **Milestone:** M2 · **Status:** Accepted
+- **Amends the execution timing in ADR-0002. The integration mechanism itself is unchanged.**
+
+**Context.** ADR-0002 decided to vendor upstream history into this repository and
+scheduled the merge as M2's first task. Two things about M2 make that the wrong
+moment.
+
+1. **M2 does not need it.** The M2 shell renders a page bundled in the APK. The
+   Gradle project has no dependency on upstream at all. The first thing that
+   genuinely needs upstream is the shared-UI asset build in M3.
+2. **It would put M2's own acceptance criterion at risk.** Merging turns on the
+   `opencode-checks` CI job, which runs `bun install --frozen-lockfile`,
+   `bun run lint` and `bun run typecheck` across roughly thirty upstream packages.
+   "Do not mark complete until Gradle and CI are green" would then depend on code
+   this project has not written and cannot fix.
+
+There is also a review cost: the merge adds ~6,500 files to a diff intended to be
+reviewed on a phone, alongside the Android shell it would bury.
+
+**Decision.** Vendor upstream at the **start of M3**, where the shared-UI build
+needs it, rather than at the start of M2.
+
+**Consequences.**
+
+- M2's diff stays small and reviewable, and its CI signal is about the Android
+  build alone.
+- M3 absorbs the merge plus the first upstream `bun install`. When
+  `opencode-checks` first runs, any redness in it is upstream's, and must be
+  reported as such rather than "fixed" by weakening the check.
+- Nothing about ADR-0002 changes: the mechanism is still a merge of upstream
+  history, and the measured divergence (D1–D5) is unaffected.
+
+**Rejected alternative.** Merging now and disabling `opencode-checks` until M3.
+That would make CI green by removing a check rather than by passing it, which is
+the exact failure mode `.claude/rules/quality.md` Q4 forbids.
+
+---
 
 ## Open questions (not yet ADRs)
 

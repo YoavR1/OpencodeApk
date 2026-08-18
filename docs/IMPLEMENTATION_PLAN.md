@@ -89,16 +89,9 @@ Additionally delivered beyond the original criteria: the Android shell decision
 
 **Tasks**
 
-0. **Vendor upstream (ADR-0002) — do this first.**
-   ```
-   git remote add upstream https://github.com/anomalyco/opencode
-   git fetch upstream dev
-   git merge upstream/dev --allow-unrelated-histories
-   ```
-   Resolve exactly two conflicts: keep our `README.md` (D4); take upstream's
-   `.gitignore` plus our Android/secrets section (D5). Commit the merge on its own.
-   Then confirm `bun install --frozen-lockfile` behaves — if the cloud proxy blocks
-   it, record that and let CI be the authority.
+0. ~~Vendor upstream~~ — **moved to M3 (ADR-0012).** M2 has no dependency on
+   upstream, and merging here would make M2's green-CI criterion depend on
+   upstream's lint and typecheck.
 
 1. Create the Android Gradle project at `apps/android/` (ADR-0010) with a
    **committed Gradle wrapper**.
@@ -113,24 +106,17 @@ Additionally delivered beyond the original criteria: the Android shell decision
 
 **Exit criteria (exact)**
 
-*Vendoring*
-- [ ] `git log` shows the upstream merge; `packages/app/src/context/platform.tsx`
-      exists at the expected path.
-- [ ] Exactly two files conflicted (`README.md`, `.gitignore`) and both are
-      resolved as recorded in D4/D5. Any third conflict is recorded in
-      `UPSTREAM_SYNC.md` before proceeding.
-- [ ] Upstream's own workflows are present and unmodified.
-- [ ] `bun install --frozen-lockfile` succeeds, **or** its failure is recorded
-      verbatim as BLOCKED with CI as the authority.
+*Vendoring* — **moved to M3 (ADR-0012).**
 
 *Android build*
 - [ ] `apps/android/gradlew` is committed and executable.
 - [ ] `scripts/ci/build-android.sh` exits **0** in CI (no longer 3).
-- [ ] `./gradlew lint` passes with no new baseline suppressions.
-- [ ] `./gradlew test` passes and runs **at least one real JVM test**.
+- [ ] `./gradlew lintDebug` passes with no new baseline suppressions.
+- [ ] `./gradlew testDebugUnitTest` passes and runs **at least one real JVM test**.
 - [ ] `./gradlew assembleDebug` produces `app-debug.apk`.
-- [ ] The APK is uploaded as the `app-debug-apk` CI artifact.
-- [ ] `scripts/ci/verify-apk.sh` exits **0**: dex present, manifest present, and
+- [ ] The APK is uploaded as the `opencode-android-debug` CI artifact.
+- [ ] `scripts/ci/verify-apk.sh` exits **0**: APK non-empty, dex present, manifest
+      present, application id `ai.opencode.android`, a launchable activity, and
       **no forbidden permission**.
 - [ ] The CI `android` job runs and `android build (pre-M2 phase)` no longer runs.
 

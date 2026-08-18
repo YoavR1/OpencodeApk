@@ -7,17 +7,22 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 
 ---
 
-## Current state (M0)
-
-No tests exist. There is no application code yet.
+## Current state (M2)
 
 | Layer | Status |
 |---|---|
-| Android JVM unit tests | ⬜ no Gradle project until M2 |
-| Android instrumented tests | ⬜ no Gradle project until M2 |
-| Shared UI tests | ⬜ upstream not integrated until M1/M3 |
+| Android JVM unit tests | ✅ 14 tests, run in CI by `testDebugUnitTest` |
+| Android instrumented tests | ⚠️ 4 written, **not run** — no emulator job yet |
+| Shared UI tests | ⬜ upstream vendored at M3 (ADR-0012) |
 | Integration tests | ⬜ |
-| Manual device verification | ⬜ |
+| Manual device verification | ⬜ awaiting a device report |
+
+**On the instrumented tests.** They are written and committed but no CI job runs
+them, so they are ⚠️ rather than ✅. An emulator job is deliberately deferred:
+`reactivecircus/android-emulator-runner` adds several minutes and a flakiness
+surface to every push, and M2 has four tests to justify it. M3 adds the "shared
+UI mounts" assertion, which is the point where a device-backed job earns its
+cost. Until then, "the APK launches" is verified by a device report, not by CI.
 
 ---
 
@@ -27,7 +32,20 @@ Fast, no device. Run by `./gradlew test`.
 
 | Area | Test | Milestone | Status |
 |---|---|---|---|
-| Build sanity | Gradle project assembles and a trivial test runs | M2 | ⬜ |
+| Build sanity | Gradle project assembles and real tests run | M2 | ✅ |
+| Asset origin | `WebOrigin.ORIGIN` is https on the reserved domain | M2 | ✅ |
+| Asset origin | `INDEX_URL` resolves to the bundled entry point | M2 | ✅ |
+| Asset origin | `url()` tolerates a leading slash; nested paths work | M2 | ✅ |
+| Asset origin | App origin recognised bare, with path, query, fragment | M2 | ✅ |
+| Asset origin | `http://` is rejected | M2 | ✅ |
+| Asset origin | **Lookalike hosts rejected** (`…net.evil.com`, `not…net`) | M2 | ✅ |
+| Asset origin | `null`, empty, `file://`, unrelated https rejected | M2 | ✅ |
+| Log redaction | `password=` / `password:` / case variants | M2 | ✅ |
+| Log redaction | token, secret, apikey, api_key | M2 | ✅ |
+| Log redaction | **whole `Authorization:` header value** | M2 | ✅ |
+| Log redaction | Basic credentials embedded in a URL | M2 | ✅ |
+| Log redaction | surrounding context preserved | M2 | ✅ |
+| Log redaction | `passwordless` not falsely redacted | M2 | ✅ |
 | Platform bridge | Message serialisation/deserialisation | M4 | ⬜ |
 | Platform bridge | Rejects malformed and out-of-contract messages | M4 | ⬜ |
 | Server connection | Local `ServerConnection` value construction | M7 | ⬜ |
@@ -42,8 +60,10 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 
 | Area | Test | Milestone | Status |
 |---|---|---|---|
-| App launch | Activity starts without crashing | M2 | ⬜ |
-| WebView | Asset loader serves the app origin | M2 | ⬜ |
+| App launch | Activity starts without crashing | M2 | ⚠️ written, no emulator job |
+| App identity | `packageName` is `ai.opencode.android` | M2 | ⚠️ written, no emulator job |
+| WebView | Security settings locked down (file access off both forms) | M2 | ⚠️ written, no emulator job |
+| WebView | Placeholder loads from the **https** asset origin, not `file://` | M2 | ⚠️ written, no emulator job |
 | Shared UI | Upstream UI mounts and renders | M3 | ⬜ |
 | Platform adapter | `notify` produces a real notification | M4 | ⬜ |
 | Platform adapter | `openExternal` fires the right `Intent` | M4 | ⬜ |
@@ -86,11 +106,18 @@ Upstream's own tests, run per-package. **Never** via the root `test` script.
 
 | Check | Script | Milestone | Status |
 |---|---|---|---|
-| Workspace lint/typecheck | `scripts/ci/check-opencode.sh` | M1 | ⬜ |
-| `assembleDebug` succeeds | `scripts/ci/build-android.sh` | M2 | ⬜ |
-| Debug APK uploaded as artifact | `.github/workflows/android-ci.yml` | M2 | ⬜ |
-| APK contains `arm64-v8a` | `scripts/ci/verify-apk.sh` | M7 | ⬜ |
-| APK requests no forbidden permission | `scripts/ci/verify-apk.sh` | M2 | ⬜ |
+| Shell scripts parse and are executable | `android-ci.yml` hygiene job | M0 | ✅ |
+| Control files present; no secrets committed | `android-ci.yml` hygiene job | M0 | ✅ |
+| Workspace lint/typecheck | `scripts/ci/check-opencode.sh` | M3 | ⬜ activates on the vendoring merge |
+| `lintDebug` passes | `scripts/ci/build-android.sh` | M2 | ✅ |
+| `testDebugUnitTest` passes | `scripts/ci/build-android.sh` | M2 | ✅ |
+| `assembleDebug` succeeds | `scripts/ci/build-android.sh` | M2 | ✅ |
+| Debug APK uploaded as `opencode-android-debug` | `android-ci.yml` | M2 | ✅ |
+| APK is non-empty (≥100 KB) | `scripts/ci/verify-apk.sh` | M2 | ✅ |
+| Application id is `ai.opencode.android` | `scripts/ci/verify-apk.sh` | M2 | ✅ |
+| APK declares a launchable activity | `scripts/ci/verify-apk.sh` | M2 | ✅ |
+| APK requests no forbidden permission | `scripts/ci/verify-apk.sh` | M2 | ✅ |
+| APK contains `arm64-v8a` | `scripts/ci/verify-apk.sh` | M7 | ⬜ no native libs yet |
 | Release APK signs and builds | CI | M11 | ⬜ |
 
 ## Layer 6 — Manual device verification
@@ -98,13 +125,17 @@ Upstream's own tests, run per-package. **Never** via the root `test` script.
 Some things only a human with a phone can confirm. Record results in
 `docs/CURRENT_STATUS.md` with the device model and Android version.
 
-| Check | Milestone |
-|---|---|
-| APK installs on a real phone | M2 |
-| UI is usable one-handed | M4 |
-| A real agent turn completes on-device | M7 |
-| App survives an overnight background period | M9 |
-| Battery drain is acceptable | M9 |
+| Check | Milestone | Status |
+|---|---|---|
+| APK installs on a real phone | M2 | ⬜ **awaiting device report** |
+| App cold-launches without crashing (ARM64) | M2 | ⬜ **awaiting device report** |
+| Placeholder shows the https origin, not `file://` | M2 | ⬜ **awaiting device report** |
+| Dark mode follows the system setting | M2 | ⬜ **awaiting device report** |
+| Back button exits cleanly from the first page | M2 | ⬜ **awaiting device report** |
+| UI is usable one-handed | M4 | ⬜ |
+| A real agent turn completes on-device | M7 | ⬜ |
+| App survives an overnight background period | M9 | ⬜ |
+| Battery drain is acceptable | M9 | ⬜ |
 
 ---
 

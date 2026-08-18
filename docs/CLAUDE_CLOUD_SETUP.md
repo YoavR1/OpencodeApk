@@ -27,16 +27,40 @@ exactly why `.claude/rules/quality.md` requires artifacts.
 
 ## No Android SDK in the cloud session
 
-There is no Android SDK here. That means:
+No Android SDK is provisioned by default. **CI remains the Android build
+authority** — `.github/workflows/android-ci.yml` installs the SDK and performs the
+build that counts, and a device report is what proves runtime behaviour.
 
-- `./gradlew assembleDebug` will **not** run in a cloud session.
-- **CI is the Android build authority.** `.github/workflows/android-ci.yml`
-  installs the SDK and performs the real build.
-- Do not attempt to install the Android SDK inside a session to get local green
-  output. It is slow, fragile, and does not make the result more trustworthy.
+**Installing the SDK in a session is allowed when it shortens a real debug loop.**
+M2 hit a genuine toolchain problem (AGP/androidx version constraints) that only a
+real build could diagnose, and each CI round cost minutes. Installing the
+command-line tools turned that into a seconds-long local loop and produced better
+code — it found a WebView render-process crash bug and three toolchain errors that
+would otherwise have been several more CI rounds each.
 
-Cloud sessions are for: reading code, writing code, writing docs, reasoning, and
-pushing. CI is for: building and proving.
+The line to hold is the *purpose*:
+
+- **Legitimate:** iterating locally to diagnose a real failure, then pushing and
+  letting CI confirm.
+- **Not legitimate:** treating a local green build as the result, or changing
+  project semantics so that something passes locally.
+
+To set it up:
+
+```bash
+curl -sSL -o cmdtools.zip \
+  https://dl.google.com/android/repository/commandlinetools-linux-9862592_latest.zip
+unzip -q cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0"
+```
+
+Note the platform is `android-37.0`, not `android-37`: current platforms carry a
+minor version. `sdkmanager --list | grep platforms` shows what is actually offered.
+
+Cloud sessions are for: reading code, writing code, diagnosing, and pushing.
+CI is for: proving. A device is for: proving runtime behaviour.
 
 ## Network and the agent proxy
 

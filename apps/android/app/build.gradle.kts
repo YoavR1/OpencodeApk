@@ -1,11 +1,12 @@
 plugins {
+    // AGP 9 ships built-in Kotlin support; applying org.jetbrains.kotlin.android
+    // on top of it is an error. See https://kotl.in/gradle/agp-built-in-kotlin
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "ai.opencode.android"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "ai.opencode.android"
@@ -41,12 +42,6 @@ android {
         buildConfig = true
     }
 
-    sourceSets {
-        getByName("main") { java.srcDirs("src/main/kotlin") }
-        getByName("test") { java.srcDirs("src/test/kotlin") }
-        getByName("androidTest") { java.srcDirs("src/androidTest/kotlin") }
-    }
-
     testOptions {
         unitTests {
             // Lets JVM unit tests touch android.util.Log without an "not mocked"
@@ -57,17 +52,8 @@ android {
 
     lint {
         abortOnError = true
-        // Reports are uploaded by CI; keep both formats.
-        htmlReport = true
-        xmlReport = true
-    }
-}
-
-// The modern compilerOptions DSL. `kotlinOptions` is deprecated in Kotlin 2.2 and
-// its deprecation level has been rising, so it is avoided rather than suppressed.
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        // htmlReport/xmlReport are not set: AGP 9 always generates lint reports,
+        // and the setters are deprecated.
     }
 }
 

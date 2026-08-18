@@ -1,12 +1,16 @@
 # Versions are pinned deliberately. See docs/DECISIONS.md ADR-0011.
 #
-# AGP 8.13.2 + Gradle 8.14.3 is chosen over the AGP 9.x line: 9.x carries DSL
-# changes that cannot be validated from a cloud session (no Android SDK), and a
-# green CI build is an M2 acceptance criterion. Revisit once CI can prove it.
+# AGP 9.x is required, not merely preferred: androidx.core 1.19.0 declares
+# "requires Android Gradle plugin 9.1.0 or higher" and "compile against version 37
+# or later" in its AAR metadata, and the build fails at CheckAarMetadata otherwise.
+# The first CI run proved this. See ADR-0011 for the correction.
+#
+# compileSdk 37 / targetSdk 36 is deliberate: compiling against the newer API is
+# what androidx demands, while targetSdk governs runtime behaviour changes this
+# project has not tested against. Google's own guidance separates the two.
 
 [versions]
-agp = "8.13.2"
-kotlin = "2.2.21"
+agp = "9.3.1"
 
 coreKtx = "1.19.0"
 appcompat = "1.8.0"
@@ -29,4 +33,4 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# No Kotlin plugin entry: AGP 9 provides Kotlin support itself.

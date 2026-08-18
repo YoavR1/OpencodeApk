@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  The WebView is the content root. A wrapping FrameLayout would add a level of
+  view hierarchy and a second background paint for nothing; the theme already
+  paints the window background.
+-->
+<WebView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/web_view"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/background_base">
-
-    <WebView
-        android:id="@+id/web_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
-
-</FrameLayout>
+    android:layout_height="match_parent" />
