@@ -1,6 +1,6 @@
 import type { DraftStore, Platform } from "@opencode-ai/app"
 import type { Bridge } from "./bridge"
-import { DEGRADED, UNSUPPORTED, type UnsupportedCapability, UnsupportedOnAndroidError } from "./capabilities"
+import { DEGRADED, SUPPORTED, UNSUPPORTED, type UnsupportedCapability, UnsupportedOnAndroidError } from "./capabilities"
 
 /**
  * What `Platform.storage` must return, derived from the boundary itself.
@@ -207,4 +207,4 @@ export function refuseUnsupported(capability: UnsupportedCapability): never {
   throw new UnsupportedOnAndroidError(capability)
 }
 
-export { DEGRADED, UNSUPPORTED, UnsupportedOnAndroidError }
+export { DEGRADED, SUPPORTED, UNSUPPORTED, UnsupportedOnAndroidError }

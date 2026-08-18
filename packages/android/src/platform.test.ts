@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test"
 import type { Bridge, BridgeEvent, BridgeEventName, BridgeRequest } from "./bridge"
-import { createAndroidPlatform, DEGRADED, UNSUPPORTED, UnsupportedOnAndroidError, refuseUnsupported } from "./platform"
+import { createAndroidPlatform, DEGRADED, SUPPORTED, UNSUPPORTED, UnsupportedOnAndroidError, refuseUnsupported } from "./platform"
 
 /**
  * These tests protect the property M3 established and M4 has to keep:
@@ -83,6 +83,37 @@ describe("platform identity", () => {
     expect(typeof platform.openExternal).toBe("function")
     expect(typeof platform.restart).toBe("function")
     expect(typeof platform.notify).toBe("function")
+  })
+})
+
+describe("supported capabilities are really present", () => {
+  test("every declared-supported capability exists", () => {
+    // The mirror of the unsupported check below. Without it, a capability could
+    // be dropped from the adapter while `capabilities.ts` still advertises it,
+    // and the shared UI would route around a feature this platform claims.
+    //
+    // `version` is excluded: it is a value the host supplies asynchronously, not
+    // a capability, and its absence before host info arrives is asserted in its
+    // own test below. `draftStore` is injected by the composition root.
+    const { bridge } = fakeBridge()
+    const injected = new Set(["version", "draftStore"])
+    for (const name of SUPPORTED) {
+      if (injected.has(name)) continue
+      expect(capability(bridge, name), `${name} is declared SUPPORTED`).toBeDefined()
+    }
+  })
+
+  test("draftStore is present once the composition root supplies one", () => {
+    const store = { get: async () => null } as never
+    const platform = createAndroidPlatform(fakeBridge().bridge, store)
+    expect(platform.draftStore).toBe(store)
+  })
+
+  test("nothing is declared supported and unsupported at once", () => {
+    for (const name of SUPPORTED) {
+      expect(Object.keys(UNSUPPORTED)).not.toContain(name)
+      expect(Object.keys(DEGRADED)).not.toContain(name)
+    }
   })
 })
 
