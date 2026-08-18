@@ -60,14 +60,18 @@ export function createAndroidPlatform(bridge: Bridge, draftStore?: DraftStore): 
     const cache = new Map<string, PlatformStorage>()
 
     const create = (name: string): PlatformStorage => {
+      // Parameters are annotated rather than inferred: the contextual type is a
+      // union (sync or async storage), and TypeScript does not reliably infer
+      // parameters through one.
       const api: PlatformStorage = {
-        getItem: (key) => bridge.request<string | null>({ method: "store.get", params: { name, key } }),
-        setItem: (key, value) =>
+        getItem: (key: string) => bridge.request<string | null>({ method: "store.get", params: { name, key } }),
+        setItem: (key: string, value: string) =>
           bridge.request<boolean>({ method: "store.set", params: { name, key, value } }).then(() => undefined),
-        removeItem: (key) =>
+        removeItem: (key: string) =>
           bridge.request<boolean>({ method: "store.remove", params: { name, key } }).then(() => undefined),
         clear: () => bridge.request<boolean>({ method: "store.clear", params: { name } }).then(() => undefined),
-        key: async (index) => (await bridge.request<string[]>({ method: "store.keys", params: { name } }))[index] ?? null,
+        key: async (index: number) =>
+          (await bridge.request<string[]>({ method: "store.keys", params: { name } }))[index] ?? null,
         getLength: async () => (await bridge.request<string[]>({ method: "store.keys", params: { name } })).length,
         get length() {
           return api.getLength()
