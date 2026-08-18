@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder mark: a terminal-style prompt caret. Replaced with real brand
+     artwork in M11 (docs/IMPLEMENTATION_PLAN.md). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFF8F7F7"
+        android:pathData="M38,40 L52,54 L38,68 L44,74 L64,54 L44,34 Z" />
+    <path
+        android:fillColor="#FFF8F7F7"
+        android:pathData="M66,66 H80 V74 H66 Z" />
+</vector>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      PERMISSIONS: none.
+
+      M2 renders a page bundled in the APK. No network, no storage, no sensors.
+      Every permission added later must be justified in a comment here and must
+      pass scripts/ci/verify-apk.sh, which fails the build on a forbidden one.
+
+      Deliberately NOT requested, now or later without an ADR:
+        MANAGE_EXTERNAL_STORAGE  - project folders use the Storage Access
+                                   Framework instead (.claude/rules/android.md N4)
+        REQUEST_INSTALL_PACKAGES - the app never installs anything
+
+      Expected additions:
+        INTERNET          - M5, for provider API calls through the OpenCode server
+        POST_NOTIFICATIONS- M4, for Platform.notify on API 33+
+        FOREGROUND_SERVICE- M7, to keep an agent turn alive while backgrounded
+    -->
+
+    <application
+        android:name=".OpenCodeApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.OpenCode"
+        android:enableOnBackInvokedCallback="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density|fontScale">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

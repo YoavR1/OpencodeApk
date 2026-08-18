@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is denied everywhere except loopback.
+
+  From M7 the OpenCode server runs on the device and is reached at
+  http://127.0.0.1:<ephemeral-port>. That is the only cleartext exception this
+  app will ever need, and it is scoped here rather than by setting
+  android:usesCleartextTraffic="true", which would allow cleartext to any host.
+
+  See .claude/rules/android.md N5 and ADR-0006.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

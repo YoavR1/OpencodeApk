@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      DayNight so the app follows the system setting with no code. The window
+      background matches the web page's background colour, so a cold launch does
+      not flash white before the WebView paints.
+    -->
+    <style name="Theme.OpenCode" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/background_base</item>
+        <item name="android:colorBackground">@color/background_base</item>
+
+        <!-- Edge-to-edge: the Activity insets its own content. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

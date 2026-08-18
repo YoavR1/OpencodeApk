@@ -16,7 +16,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
 
-TASKS="${TASKS:-lint test assembleDebug}"
+# Debug-variant tasks specifically: `lint` and `test` would also build the release
+# variant, which M2 does not configure signing or shrinking for. Naming the debug
+# tasks keeps CI honest about what it actually verified.
+TASKS="${TASKS:-lintDebug testDebugUnitTest assembleDebug}"
 
 say()  { printf '%s\n' "$*"; }
 head2() { printf '\n== %s ==\n' "$*"; }

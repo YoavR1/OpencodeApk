@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>OpenCode</title>
+<!--
+  M2 placeholder. Replaced in M3 by the real shared OpenCode UI, built from
+  packages/android (docs/DECISIONS.md ADR-0010).
+
+  Everything here is inline and self-contained: no network request is made, and
+  the app holds no INTERNET permission, so an external reference would simply
+  fail. It also proves the asset origin is serving correctly.
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #f8f7f7; --fg: #1b1b1b; --muted: #6b6b6b; --line: #e2e0e0; --accent: #3b7ddd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121212; --fg: #e6e6e6; --muted: #9a9a9a; --line: #2a2a2a; --accent: #7aa7f0; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  main { width: 100%; max-width: 420px; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  p.sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+  dl { margin: 0; border-top: 1px solid var(--line); }
+  div.row { display: flex; justify-content: space-between; gap: 12px;
+            padding: 9px 0; border-bottom: 1px solid var(--line); }
+  dt { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  dd { margin: 0; font-size: 13px; text-align: right; word-break: break-all; }
+  .ok { color: var(--accent); }
+  footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>OpenCode <span class="ok">▸</span></h1>
+  <p class="sub">Android shell — milestone M2</p>
+
+  <dl>
+    <div class="row"><dt>Shell</dt><dd id="shell">native WebView</dd></div>
+    <div class="row"><dt>Origin</dt><dd id="origin">–</dd></div>
+    <div class="row"><dt>Secure context</dt><dd id="secure">–</dd></div>
+    <div class="row"><dt>Viewport</dt><dd id="viewport">–</dd></div>
+    <div class="row"><dt>Server</dt><dd>none (by design)</dd></div>
+  </dl>
+
+  <footer>
+    The shared OpenCode UI replaces this page in M3.
+  </footer>
+</main>
+<script>
+  // Reporting the real origin is the point: if this shows the https app origin
+  // rather than file://, WebViewAssetLoader is wired correctly (ADR-0008).
+  document.getElementById("origin").textContent = location.origin;
+  document.getElementById("secure").textContent = window.isSecureContext ? "yes" : "no";
+  const setViewport = () => {
+    document.getElementById("viewport").textContent =
+      window.innerWidth + "×" + window.innerHeight;
+  };
+  setViewport();
+  window.addEventListener("resize", setViewport);
+</script>
+</body>
+</html>

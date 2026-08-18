@@ -22,6 +22,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
 
 STATUS=0
+# The application ID this project has committed to (docs/ARCHITECTURE.md 2.2).
+EXPECTED_APPLICATION_ID="${EXPECTED_APPLICATION_ID:-ai.opencode.android}"
+# A debug APK with resources and dex is comfortably above this; a stub is not.
+MIN_APK_BYTES="${MIN_APK_BYTES:-100000}"
+
 say()  { printf '%s\n' "$*"; }
 head2() { printf '\n== %s ==\n' "$*"; }
 bad()  { printf '[FAIL] %s\n' "$*"; STATUS=1; }
@@ -59,6 +64,14 @@ fi
 say "apk  : $APK"
 say "size : $(du -h "$APK" | cut -f1)"
 
+# An APK that exists but is a stub is worse than none: it looks like success.
+APK_BYTES="$(wc -c < "$APK" | tr -d ' ')"
+if [ "$APK_BYTES" -lt "$MIN_APK_BYTES" ]; then
+  bad "APK is only ${APK_BYTES} bytes (expected at least ${MIN_APK_BYTES}) - not a real build"
+else
+  good "APK is non-empty (${APK_BYTES} bytes)"
+fi
+
 if ! command -v unzip >/dev/null 2>&1; then
   say "ENV: 'unzip' is required."
   exit 2
@@ -93,6 +106,32 @@ else
   else
     bad "arm64-v8a MISSING. An x86_64-only APK is emulator-only and cannot"
     bad "satisfy any milestone claim (.claude/rules/android.md N1)."
+  fi
+fi
+
+# --------------------------------------------------------------- application id
+head2 "application id"
+BADGING=""
+if command -v aapt2 >/dev/null 2>&1; then
+  BADGING="$(aapt2 dump badging "$APK" 2>/dev/null)"
+elif command -v aapt >/dev/null 2>&1; then
+  BADGING="$(aapt dump badging "$APK" 2>/dev/null)"
+fi
+
+if [ -z "$BADGING" ]; then
+  warn "aapt/aapt2 unavailable - cannot read the application id (not treated as a pass)"
+else
+  ACTUAL_ID="$(printf '%s' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+  if [ "$ACTUAL_ID" = "$EXPECTED_APPLICATION_ID" ]; then
+    good "application id is $ACTUAL_ID"
+  else
+    bad "application id is '$ACTUAL_ID', expected '$EXPECTED_APPLICATION_ID'"
+  fi
+  LAUNCHABLE="$(printf '%s' "$BADGING" | grep -c "launchable-activity" || true)"
+  if [ "$LAUNCHABLE" -gt 0 ]; then
+    good "APK declares a launchable activity"
+  else
+    bad "no launchable activity - the APK would install but not start"
   fi
 fi
 

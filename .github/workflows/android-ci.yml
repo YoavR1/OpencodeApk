@@ -215,10 +215,10 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build (lint, unit tests, assembleDebug)
+      - name: Build (lintDebug, testDebugUnitTest, assembleDebug)
         run: scripts/ci/build-android.sh
         env:
-          TASKS: lint test assembleDebug
+          TASKS: lintDebug testDebugUnitTest assembleDebug
 
       - name: Verify APK
         run: scripts/ci/verify-apk.sh
@@ -231,7 +231,18 @@ jobs:
           apk="$(find . -name '*debug*.apk' -path '*outputs*' | head -1 || true)"
           echo "path=$apk" >> "$GITHUB_OUTPUT"
           if [ -n "$apk" ]; then
-            echo "Found debug APK: $apk" >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "## Debug APK"
+              echo ""
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Path | \`$apk\` |"
+              echo "| Size | $(du -h "$apk" | cut -f1) |"
+              echo "| Artifact | \`opencode-android-debug\` |"
+              echo ""
+              echo "Download it from this run's Artifacts section, unzip, and install on your phone."
+              echo "See \`docs/PHONE_WORKFLOW.md\`."
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No debug APK produced." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -240,7 +251,7 @@ jobs:
         if: steps.apk.outputs.path != ''
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
+          name: opencode-android-debug
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 30

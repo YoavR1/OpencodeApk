@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Kept in step with the web placeholder so there is no flash on load. -->
+    <color name="background_base">#FFF8F7F7</color>
+    <color name="on_background">#FF1B1B1B</color>
+</resources>
