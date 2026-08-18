@@ -1,7 +1,17 @@
 import type { DraftStore, Platform } from "@opencode-ai/app"
-import type { AsyncStorage } from "@solid-primitives/storage"
 import type { Bridge } from "./bridge"
 import { DEGRADED, UNSUPPORTED, type UnsupportedCapability, UnsupportedOnAndroidError } from "./capabilities"
+
+/**
+ * What `Platform.storage` must return, derived from the boundary itself.
+ *
+ * Upstream's own type comes from `@solid-primitives/storage`, which
+ * `packages/app` depends on and this package does not. Reading it back off
+ * `Platform` keeps the dependency surface here at one package, and means the
+ * adapter tracks upstream's contract rather than a second copy of it that could
+ * drift - including any type arguments upstream applies.
+ */
+type PlatformStorage = ReturnType<NonNullable<Platform["storage"]>>
 
 /**
  * The Android implementation of upstream's `Platform`.
@@ -47,10 +57,10 @@ export function createAndroidPlatform(bridge: Bridge, draftStore?: DraftStore): 
    * same object, matching how the desktop implementation behaves.
    */
   const storage = (() => {
-    const cache = new Map<string, AsyncStorage>()
+    const cache = new Map<string, PlatformStorage>()
 
-    const create = (name: string): AsyncStorage => {
-      const api: AsyncStorage = {
+    const create = (name: string): PlatformStorage => {
+      const api: PlatformStorage = {
         getItem: (key) => bridge.request<string | null>({ method: "store.get", params: { name, key } }),
         setItem: (key, value) =>
           bridge.request<boolean>({ method: "store.set", params: { name, key, value } }).then(() => undefined),

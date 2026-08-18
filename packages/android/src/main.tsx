@@ -126,12 +126,12 @@ function readLastRoute() {
 }
 
 /**
- * A memory history that also reports how deep it has been pushed.
+ * A memory history that also reports where its cursor is.
  *
- * The router owns its entry list privately, so depth is counted from the
- * navigations that pass through `set`. Replacements - including restoring the
- * last route at startup - do not deepen the stack, so back does not appear
- * available on the first screen the user sees.
+ * The router owns its entry list privately, so the position is tracked from the
+ * two calls that move it: `set` (push or replace) and `go` (relative move,
+ * which is how the router's own `navigate(-1)` travels). Watching only `set`
+ * would drift, and back would then claim presses that navigate nowhere.
  */
 function createTrackedHistory() {
   const history = createMemoryHistory()
@@ -209,9 +209,15 @@ function AndroidBackHandlers(props: { back: BackDispatcher }) {
 /** Answers the host's back events. */
 function answerBack(bridge: Bridge, back: BackDispatcher) {
   return bridge.on("back", ({ token }) => {
-    // The host exits the app if this does not arrive, so the answer is sent
-    // before anything that could throw, and never awaited.
-    void bridge.request({ method: "back.handled", params: { token, handled: back.dispatch() } }).catch(() => {})
+    // The host exits the app if no answer arrives, so one is sent even if
+    // dispatch throws - hence the `finally`. Declining is the safe default: it
+    // leaves the app, which is recoverable, rather than swallowing the press.
+    let handled = false
+    try {
+      handled = back.dispatch()
+    } finally {
+      void bridge.request({ method: "back.handled", params: { token, handled } }).catch(() => {})
+    }
   })
 }
 
