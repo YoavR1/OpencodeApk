@@ -111,6 +111,23 @@ bump; the paths are the check.
 
 ---
 
+## Known issues at the current pin
+
+Problems that exist in upstream at `4e81a0b` and are **not** caused by this
+project. Recorded so they are visible rather than quietly worked around, and so a
+future bump can check whether they are gone.
+
+| # | Issue | Evidence | Effect here |
+|---|---|---|---|
+| K1 | `bun run lint` (oxlint) reports **1 error** across the workspace: `'0'-prefixed octal literals and octal escape sequences are deprecated` | Appears in CI amongst warnings for upstream's plugin/ai-sdk files. `packages/android` contains no octal escapes (grepped). Present before this project added any TypeScript. | Whole-workspace lint cannot be our CI gate. `scripts/ci/check-opencode.sh` lints `packages/android` by default; `LINT_ALL=1` runs everything. |
+
+Upstream's own lint totals at this pin, for reference: **4,864 warnings and 1
+error** over 3,252 files. The warnings are upstream's normal state — oxlint only
+fails on errors.
+
+**On every bump, run with `LINT_ALL=1` and `TYPECHECK_ALL=1`** and update this
+table. If K1 has been fixed upstream, re-scope our lint to the whole workspace.
+
 ## Bump procedure
 
 1. Read upstream's changelog/commits between the old and new pin.
