@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsgo -b",
     "test": "bun test src --only-failures"
   },
   "devDependencies": {

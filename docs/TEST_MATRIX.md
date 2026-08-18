@@ -7,13 +7,14 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 
 ---
 
-## Current state (M2)
+## Current state (M3)
 
 | Layer | Status |
 |---|---|
-| Android JVM unit tests | ✅ 14 tests, run in CI by `testDebugUnitTest` |
+| Android JVM unit tests | ✅ 15 tests, run in CI by `testDebugUnitTest` |
 | Android instrumented tests | ⚠️ 4 written, **not run** — no emulator job yet |
-| Shared UI tests | ⬜ upstream vendored at M3 (ADR-0012) |
+| Renderer adapter tests | ✅ run in CI by `bun test --cwd packages/android` |
+| Shared UI build | ✅ upstream vendored; `build-shared-ui.sh` gates the APK |
 | Integration tests | ⬜ |
 | Manual device verification | ⬜ awaiting a device report |
 
@@ -46,6 +47,7 @@ Fast, no device. Run by `./gradlew test`.
 | Log redaction | Basic credentials embedded in a URL | M2 | ✅ |
 | Log redaction | surrounding context preserved | M2 | ✅ |
 | Log redaction | `passwordless` not falsely redacted | M2 | ✅ |
+| Asset origin | **App is served from the origin root**, so the shared CSS's `/assets/…` font URLs resolve | M3 | ✅ |
 | Platform bridge | Message serialisation/deserialisation | M4 | ⬜ |
 | Platform bridge | Rejects malformed and out-of-contract messages | M4 | ⬜ |
 | Server connection | Local `ServerConnection` value construction | M7 | ⬜ |
@@ -78,16 +80,37 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Lifecycle | Network transition does not lose session data | M9 | ⬜ |
 | Storage | Data persists across app restart | M7 | ⬜ |
 
-## Layer 3 — Shared UI tests (upstream)
+## Layer 3 — Renderer and shared UI (TypeScript)
 
-Upstream's own tests, run per-package. **Never** via the root `test` script.
+Run per-package. **Never** via the root `test` script.
+
+### Our renderer — `bun test --cwd packages/android`
+
+| Area | Test | Milestone | Status |
+|---|---|---|---|
+| Identity | reports `platform: "android"` | M3 | ✅ |
+| Identity | implements the three members `Platform` requires | M3 | ✅ |
+| Capabilities | **every `UNSUPPORTED` member is `undefined`**, not a stub | M3 | ✅ |
+| Capabilities | `openPath` / `openDirectoryPickerDialog` are absent, not present-and-undefined | M3 | ✅ |
+| Capabilities | `DEGRADED` members exist and each names a milestone | M3 | ✅ |
+| Capabilities | no capability appears in two categories | M3 | ✅ |
+| Capabilities | `refuseUnsupported` throws a typed, explanatory error | M3 | ✅ |
+| Capabilities | every `UNSUPPORTED` reason is `never` or a milestone | M3 | ✅ |
+| `openExternal` | passes `http`, `https`, `mailto` to the host | M3 | ✅ |
+| `openExternal` | **refuses `javascript:`, `intent:`, `file:`, `content:`** | M3 | ✅ |
+| `openExternal` | ignores malformed URLs without throwing | M3 | ✅ |
+| `version` | from the host, `undefined` outside it | M3 | ✅ |
+
+### Upstream's own tests
+
+Not run by this project's CI. They belong to upstream's own workflows, which came
+with the vendoring merge and are unmodified.
 
 | Package | Command | Status |
 |---|---|---|
-| `packages/app` | `bun test --cwd packages/app` | ⬜ not integrated |
-| `packages/session-ui` | `bun test --cwd packages/session-ui` | ⬜ not integrated |
-| `packages/ui` | `bun test --cwd packages/ui` | ⬜ not integrated |
-| `packages/client` | `bun test --cwd packages/client` | ⬜ not integrated |
+| `packages/app` | `bun test --cwd packages/app` | ⬜ upstream's responsibility |
+| `packages/session-ui` | `bun test --cwd packages/session-ui` | ⬜ upstream's responsibility |
+| `packages/ui` | `bun test --cwd packages/ui` | ⬜ upstream's responsibility |
 
 ## Layer 4 — Integration tests
 
@@ -108,7 +131,11 @@ Upstream's own tests, run per-package. **Never** via the root `test` script.
 |---|---|---|---|
 | Shell scripts parse and are executable | `android-ci.yml` hygiene job | M0 | ✅ |
 | Control files present; no secrets committed | `android-ci.yml` hygiene job | M0 | ✅ |
-| Workspace lint/typecheck | `scripts/ci/check-opencode.sh` | M3 | ⬜ activates on the vendoring merge |
+| Workspace lint (oxlint, whole repo) | `scripts/ci/check-opencode.sh` | M3 | ✅ |
+| Typecheck, scoped to `@opencode-ai/android` + `@opencode-ai/app` | `scripts/ci/check-opencode.sh` | M3 | ✅ |
+| Shared UI builds; fonts and chunks resolve | `scripts/ci/build-shared-ui.sh` | M3 | ✅ |
+| **APK contains `assets/web/index.html`** | `scripts/ci/verify-apk.sh` | M3 | ✅ |
+| Build fails loudly when the shared UI is missing | Gradle `verifySharedUi` | M3 | ✅ |
 | `lintDebug` passes | `scripts/ci/build-android.sh` | M2 | ✅ |
 | `testDebugUnitTest` passes | `scripts/ci/build-android.sh` | M2 | ✅ |
 | `assembleDebug` succeeds | `scripts/ci/build-android.sh` | M2 | ✅ |
@@ -129,7 +156,10 @@ Some things only a human with a phone can confirm. Record results in
 |---|---|---|
 | APK installs on a real phone | M2 | ⬜ **awaiting device report** |
 | App cold-launches without crashing (ARM64) | M2 | ⬜ **awaiting device report** |
-| Placeholder shows the https origin, not `file://` | M2 | ⬜ **awaiting device report** |
+| App shows the https origin, not `file://` | M2 | ⬜ **awaiting device report** |
+| **The real OpenCode UI renders** (not a placeholder) | M3 | ⬜ **awaiting device report** |
+| Navigation between views works | M3 | ⬜ **awaiting device report** |
+| Text renders in the bundled fonts, not a fallback | M3 | ⬜ **awaiting device report** |
 | Dark mode follows the system setting | M2 | ⬜ **awaiting device report** |
 | Back button exits cleanly from the first page | M2 | ⬜ **awaiting device report** |
 | UI is usable one-handed | M4 | ⬜ |

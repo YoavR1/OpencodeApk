@@ -17,6 +17,7 @@
     "outDir": "node_modules/.ts-dist",
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts", "package.json"],
+  "references": [{ "path": "../app" }],
+  "include": ["src", "package.json"],
   "exclude": ["src/**/*.test.ts"]
 }
