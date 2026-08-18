@@ -1,4 +1,46 @@
-# --- Android ---
+.DS_Store
+node_modules
+.worktrees
+.sst
+.env
+.env.local
+.idea
+.vscode
+.codex
+*~
+playground
+tmp
+dist
+ts-dist
+.turbo
+**/.serena
+.serena/
+**/.omo
+.omo/
+/result
+refs
+Session.vim
+/opencode.json
+a.out
+target
+.scripts
+.direnv/
+
+# Local dev files
+opencode-dev
+UPCOMING_CHANGELOG.md
+logs/
+*.bun-build
+tsconfig.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# OpencodeApk additions (divergence D5 in docs/UPSTREAM_SYNC.md)
+#
+# Everything above this line is upstream's .gitignore, kept verbatim so an
+# upstream bump re-merges cleanly. Only append below.
+# ---------------------------------------------------------------------------
+
+# --- Android build output ---
 *.apk
 *.aab
 *.keystore
@@ -9,22 +51,12 @@ build/
 captures/
 .cxx/
 
+# --- Generated: shared UI assets copied into the APK ---
+apps/android/app/src/main/assets/web/
+
 # --- Secrets ---
-.env
 .env.*
 !.env.example
-
-# --- JS / Bun ---
-node_modules/
-dist/
-.turbo/
-*.tsbuildinfo
-
-# --- Editors / OS ---
-.idea/
-*.iml
-.DS_Store
-Thumbs.db
 
 # --- Claude Code local overrides ---
 .claude/settings.local.json
