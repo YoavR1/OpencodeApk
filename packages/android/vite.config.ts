@@ -15,11 +15,14 @@ export default defineConfig({
   root: "src",
   publicDir: "../../app/public",
 
-  // Assets are served by WebViewAssetLoader from
-  // https://appassets.androidplatform.net/assets/ - a sub-path, not the origin
-  // root - so every emitted URL must be relative. An absolute "/assets/..." would
-  // resolve against the origin root and 404.
-  base: "./",
+  // Left at vite's default of "/", matching the web build exactly.
+  //
+  // The shared stylesheet references bundled fonts with root-absolute URLs
+  // (`url("/assets/Inter.ttf")` in packages/app/src/index.css), so the app has to
+  // be served from an origin root. WebViewAssetLoader is configured accordingly
+  // (see WebOrigin.ASSET_PATH). Setting a relative base here would break those
+  // font URLs while appearing to work, because a missing font falls back
+  // silently.
 
   build: {
     outDir: "../dist",

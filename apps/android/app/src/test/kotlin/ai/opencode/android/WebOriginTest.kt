@@ -20,9 +20,19 @@ class WebOriginTest {
 
     @Test
     fun `index url points at the bundled entry point`() {
+        assertEquals("https://appassets.androidplatform.net/index.html", WebOrigin.INDEX_URL)
+    }
+
+    @Test
+    fun `the app is served from the origin root`() {
+        // Not cosmetic: the shared stylesheet references fonts as
+        // url("/assets/Inter.ttf"), and vite emits its chunks under /assets/.
+        // Serving from a sub-path would 404 all of them, and a missing font
+        // fails silently, so this is pinned.
+        assertEquals("/", WebOrigin.ASSET_PATH)
         assertEquals(
-            "https://appassets.androidplatform.net/assets/index.html",
-            WebOrigin.INDEX_URL,
+            "https://appassets.androidplatform.net/assets/Inter.ttf",
+            WebOrigin.url("assets/Inter.ttf"),
         )
     }
 
@@ -34,8 +44,8 @@ class WebOriginTest {
     @Test
     fun `url builds nested asset paths`() {
         assertEquals(
-            "https://appassets.androidplatform.net/assets/chunk/main.js",
-            WebOrigin.url("chunk/main.js"),
+            "https://appassets.androidplatform.net/assets/main.js",
+            WebOrigin.url("assets/main.js"),
         )
     }
 

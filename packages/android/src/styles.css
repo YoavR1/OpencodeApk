@@ -1,8 +1,10 @@
 /*
- * The shared design system, plus the minimum needed to sit correctly inside an
- * Android WebView. Anything beyond that belongs in the shared UI, not here.
+ * Only the minimum needed to sit correctly inside an Android WebView.
+ *
+ * The shared design system is NOT imported here: packages/app/src/app.tsx already
+ * does `import "@/index.css"`, so it arrives with AppInterface. Desktop's
+ * equivalent stylesheet is empty for the same reason.
  */
-@import "@opencode-ai/app/index.css";
 
 html,
 body {

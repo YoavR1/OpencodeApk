@@ -67,16 +67,31 @@ fi
 say "dist  : $DIST ($(du -sh "$DIST" | cut -f1))"
 say "files : $(find "$DIST" -type f | wc -l | tr -d ' ')"
 
-# The assets are served from a sub-path, so absolute /assets URLs would 404.
-if grep -qE '(src|href)="/[^/]' "$DIST/index.html"; then
-  say ""
-  say "[FAIL] index.html contains root-absolute asset URLs."
-  say "       WebViewAssetLoader serves these under /assets/, not at the origin"
-  say "       root, so they would 404 on device. vite 'base' must stay relative."
-  grep -nE '(src|href)="/[^/]' "$DIST/index.html" | head -5
-  exit 1
-fi
-say "urls  : relative (correct for the WebViewAssetLoader sub-path)"
+# The app is served from the origin root, so root-absolute URLs are correct.
+# What matters is that every referenced file actually exists in dist - a missing
+# font or chunk is a silent 404 on device, not a build error.
+MISSING=0
+while read -r ref; do
+  [ -z "$ref" ] && continue
+  target="$DIST/${ref#/}"
+  if [ ! -f "$target" ]; then
+    say "[FAIL] index.html references $ref but $target does not exist"
+    MISSING=1
+  fi
+done <<< "$(grep -oE '(src|href)="/[^"]*"' "$DIST/index.html" | sed -E 's/.*="([^"]*)"/\1/' | sort -u)"
+[ "$MISSING" -eq 1 ] && exit 1
+say "urls  : every root-absolute reference in index.html resolves inside dist"
+
+# The shared stylesheet loads these by absolute URL; if the public dir did not
+# come through, the UI renders in a fallback font and nothing fails loudly.
+for font in assets/Inter.ttf assets/JetBrainsMonoNerdFontMono-Regular.woff2; do
+  if [ -f "$DIST/$font" ]; then
+    say "font  : $font present"
+  else
+    say "[FAIL] $font missing from dist - vite publicDir is not wired correctly"
+    exit 1
+  fi
+done
 
 say ""
 say "OK"

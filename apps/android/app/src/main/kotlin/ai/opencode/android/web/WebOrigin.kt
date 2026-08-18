@@ -22,8 +22,16 @@ object WebOrigin {
      */
     const val DOMAIN: String = "appassets.androidplatform.net"
 
-    /** Path prefix the asset handler is registered under. */
-    const val ASSET_PATH: String = "/assets/"
+    /**
+     * Path prefix the asset handler is registered under: the origin ROOT.
+     *
+     * This is not arbitrary. The shared UI's stylesheet references bundled fonts
+     * with root-absolute URLs (`url("/assets/Inter.ttf")` in
+     * packages/app/src/index.css), and vite's own chunks are emitted under
+     * `/assets/` too. Serving the app from a sub-path would turn every one of
+     * those into a 404. Root it is, exactly as the web build assumes.
+     */
+    const val ASSET_PATH: String = "/"
 
     /** Scheme-qualified origin, e.g. `https://appassets.androidplatform.net`. */
     const val ORIGIN: String = "https://$DOMAIN"
@@ -37,7 +45,7 @@ object WebOrigin {
      * Leading slashes on [path] are ignored so that both `"index.html"` and
      * `"/index.html"` resolve identically.
      */
-    fun url(path: String): String = ORIGIN + ASSET_PATH + path.trimStart('/')
+    fun url(path: String): String = "$ORIGIN/" + path.trimStart('/')
 
     /**
      * True when [url] belongs to this app's asset origin.

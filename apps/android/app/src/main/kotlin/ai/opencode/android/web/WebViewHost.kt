@@ -36,7 +36,7 @@ object WebViewHost {
     ) {
         val loader = WebViewAssetLoader.Builder()
             .setDomain(WebOrigin.DOMAIN)
-            .addPathHandler(WebOrigin.ASSET_PATH, WebViewAssetLoader.AssetsPathHandler(context))
+            .addPathHandler(WebOrigin.ASSET_PATH, WebAssetsHandler(context))
             .build()
 
         webView.webViewClient = AssetClient(loader, onRendererGone)
@@ -97,6 +97,26 @@ object WebViewHost {
 
     /** Set only when the document-start API is unavailable. */
     private var pendingBootstrap: String? = null
+
+    /**
+     * Serves the app from the origin root while keeping its files tidy inside the
+     * APK.
+     *
+     * The shared UI must be served from `/` (see WebOrigin.ASSET_PATH), but its
+     * files live under `assets/web/` so they do not collide with anything else
+     * the APK may carry later. `AssetsPathHandler` resolves relative to the
+     * assets root, so this handler re-prefixes each request.
+     */
+    private class WebAssetsHandler(context: Context) : WebViewAssetLoader.PathHandler {
+        private val delegate = WebViewAssetLoader.AssetsPathHandler(context)
+
+        override fun handle(path: String): WebResourceResponse? =
+            delegate.handle(ASSET_SUBDIR + path.trimStart('/'))
+
+        private companion object {
+            const val ASSET_SUBDIR = "web/"
+        }
+    }
 
     // Lint's MissingOnRenderProcessGone check does not resolve the override below
     // on this Kotlin declaration and reports it as missing. The Kotlin compiler

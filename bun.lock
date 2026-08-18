@@ -27,6 +27,17 @@
         "turbo": "2.10.2",
       },
     },
+    "packages/android": {
+      "name": "@opencode-ai/android",
+      "devDependencies": {
+        "@opencode-ai/app": "workspace:*",
+        "@opencode-ai/ui": "workspace:*",
+        "@solidjs/router": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "solid-js": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "packages/app": {
       "name": "@opencode-ai/app",
       "version": "1.18.18",
