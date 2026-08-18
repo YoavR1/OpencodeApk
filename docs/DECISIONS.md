@@ -43,43 +43,72 @@ divergence ledger (`docs/UPSTREAM_SYNC.md`).
 
 ---
 
-## ADR-0002 — Upstream integration mechanism
+## ADR-0002 — Upstream integration mechanism: vendor upstream into this repository
 
-- **Date:** 2026-08-18 · **Milestone:** M0 proposed, **decided in M1** · **Status:** Provisional
+- **Date:** 2026-08-18 · **Milestone:** proposed M0, **decided M1** · **Status:** Accepted
+- **Supersedes** the Provisional lean toward a pinned submodule recorded at M0.
 
-**Context.** Given ADR-0001, upstream code must reach this repository somehow.
-Four options:
+**Context.** M1 measured the two things this decision turns on.
 
-| Option | Upstream reuse | Patchability | Bump cost | Repo size |
-|---|---|---|---|---|
-| A. Git submodule, pinned commit | Full source | Poor — cannot commit edits into the submodule | Low (move the pin) | Small |
-| B. Subtree / vendored copy | Full source | Good | High (merge conflicts) | Large (6,512 files at audit) |
-| C. Consume published npm packages | Published packages only | None | Low | Smallest |
-| D. Fork | Full source | Best | Highest | Large |
+*Measurement 1 — can the shared UI be consumed as a package?* **No.** Queried
+against the npm registry:
 
-**Key evidence pulling against C:** the required change for Android is widening
-`PlatformName` in `packages/app/src/context/platform.tsx` (line ~20) and the
-`Platform` union (line ~126). Published packages cannot be edited, so C only
-works if that widening lands upstream first, or if the union can be bypassed —
-neither is established. Also relevant: `@opencode-ai/app` is a workspace package;
-whether it is published at all must be checked in M1.
+| Package | Registry status |
+|---|---|
+| `@opencode-ai/app` | **NOT PUBLISHED** |
+| `@opencode-ai/session-ui` | **NOT PUBLISHED** |
+| `@opencode-ai/ui` | published `1.18.18` |
+| `@opencode-ai/sdk` | published `1.18.18` |
+| `@opencode-ai/client` | published but `0.0.0` (placeholder) |
 
-**Key evidence pulling toward A:** upstream already has a `patches/` directory and
-uses Bun's `patchedDependencies` — patching a pinned dependency is an established
-pattern in this codebase, so a patch-overlay workflow is idiomatic here.
+`packages/app/package.json` also exports **raw TypeScript** (`".": "./src/index.ts"`)
+and builds through `@opencode-ai/app/vite`, which supplies `vite-plugin-solid` and
+`@tailwindcss/vite`. The shared application therefore cannot be consumed from a
+registry at all; it must be built inside the upstream Bun workspace, exactly as
+`packages/desktop` is.
 
-**Provisional decision.** Start from **A (pinned submodule) plus a small tracked
-patch set**, in the style of upstream's own `patches/` mechanism.
+*Measurement 2 — how many upstream files must change?* **One, for M3.**
+`packages/app/src/context/platform.tsx`: widen `PlatformName` (~L20) and add an
+arm to the `Platform` union (~L126). A second file, `packages/app/src/utils/persist.ts`,
+wants two capability-check edits at M4. Nothing in `session-ui` or `ui` needs
+touching, and shared UI reaches no Electron API (one optional-chained
+`window.api?.setTitlebar?.()` in `app.tsx:404`, a no-op when absent).
 
-**This must be confirmed or overturned in M1** on the basis of one measurement:
-*how many upstream files actually need patching to build the shared UI with an
-Android platform?* If the answer is 1–2 mechanical edits, A holds. If it grows,
-reopen and consider D.
+**Decision.** **Vendor upstream into this repository** by adding
+`https://github.com/anomalyco/opencode` as a git remote and merging its history,
+keeping our control layer at the root. Android code is added as **new files**
+(`packages/android/`, `apps/android/`), so upstream divergence stays at the
+measured minimum.
 
-**Do not treat this as settled.** It is the single highest-leverage structural
-decision in the project.
+**Why the alternatives lose.**
 
----
+| Option | Verdict |
+|---|---|
+| **C. Consume published npm packages** | **Impossible.** `@opencode-ai/app` and `session-ui` are unpublished. Eliminated by measurement, not preference. |
+| **A. Pinned git submodule** | **Rejected.** Our Android renderer must be a workspace package to resolve `@opencode-ai/app`, but a package committed to our repo cannot live inside a submodule. Making our repo the workspace root instead would force us to replicate upstream's root `package.json` — ~60 `catalog:` entries, 17 `patchedDependencies`, and `overrides` — and re-sync all of it on every upstream bump. That is a far larger and *recurring* divergence than the 1–2 files a merge costs. |
+| **B. Subtree / vendored copy without history** | **Rejected.** Same file layout as a merge but throws away the ability to `git merge upstream/dev`, which is the entire mechanism for staying current. |
+| **D. Vendor upstream history (chosen)** | Full workspace with catalog, patches and overrides intact; `bun install` behaves exactly as upstream intends; upstream CI preserved; bumps are `git fetch upstream && git merge upstream/dev`. |
+
+**Consequences.**
+
+- Divergence is bounded by *modified* files, not by repository size. Additive files
+  never conflict, so the merge cost tracks the ledger in `docs/UPSTREAM_SYNC.md`.
+- Two of our root files collide with upstream's and must be resolved once, then
+  kept: `README.md` (keep ours) and `.gitignore` (upstream's plus our Android
+  section). `CLAUDE.md`, `docs/`, `prompts/`, `scripts/` do not collide —
+  upstream uses `AGENTS.md`, `packages/docs`, and `script/` (singular).
+- `packages/android/` sits inside upstream's existing `packages/*` workspace glob,
+  so **no edit to upstream's root `package.json` is required**.
+- `apps/android/` matches no upstream workspace glob, so Bun ignores the Gradle
+  project.
+- **This does not contradict ADR-0001.** That ADR recorded a fact — the repository
+  began empty and shared no history with upstream. This ADR decides to adopt
+  upstream history from here on. The project is a wrapper in intent and a fork in
+  mechanism, and the mechanism is what keeps divergence measurable.
+
+**Execution.** The vendoring merge is the **first task of M2**, not of M1. M1 is a
+decision milestone; performing a ~6,500-file merge here would bury the
+architecture review it is supposed to deliver in an unreviewable diff.
 
 ## ADR-0003 — Remote-server mode is a checkpoint, never the deliverable
 
@@ -179,6 +208,14 @@ runtime for Android ARM64, and native modules `@lydell/node-pty`,
 `@parcel/watcher`, and `tree-sitter-bash`/`tree-sitter-powershell`
 (`web-tree-sitter` is WASM and is the known-portable fallback for parsing).
 
+**M1 addition — a hard Android constraint on every candidate.** Since Android 10
+(API 29), an app targeting API 29+ cannot `exec()` a file in its writable data
+directory (W^X enforcement). A runtime downloaded or unpacked at first launch
+therefore **cannot be executed**. Any exec-based candidate must ship its binary
+inside the APK as `lib<name>.so` under `jniLibs/<abi>/` and run it from
+`context.applicationInfo.nativeLibraryDir`. A JNI in-process candidate avoids
+`exec` and is not subject to this. See `docs/ARCHITECTURE.md` §2.5.
+
 **If M6 disproves this,** record the disproof and re-open the runtime decision —
 do not quietly fall back to remote-only.
 
@@ -203,14 +240,120 @@ only addition needed.
 
 ---
 
+## ADR-0009 — Android shell: native Kotlin + WebView, not Tauri or Capacitor
+
+- **Date:** 2026-08-18 · **Milestone:** M1 · **Status:** Accepted
+
+**Context.** The shared UI is a vite-built SolidJS SPA. Every candidate shell
+consumes the identical static-asset output, so *upstream divergence is the same
+across all of them* — it is not a differentiator. What differs is the native layer,
+the toolchain, and what we must maintain forever.
+
+The native work this project requires regardless of shell: a foreground service
+owning the runtime, Android Keystore credential storage, SAF directory access,
+notifications, and process-death handling. **All of that is Kotlin either way.**
+
+**Decision.** A native Android application in Kotlin, hosting the shared UI in a
+`WebView` served by `androidx.webkit.WebViewAssetLoader`, with a typed
+`WebMessagePort` bridge.
+
+**Comparison.**
+
+| Criterion | **Native Kotlin + WebView** | Tauri v2 | Capacitor | CEF / GeckoView |
+|---|---|---|---|---|
+| Upstream divergence | identical | identical | identical | identical |
+| Android support maturity | platform itself | production-capable, but the newest Tauri target | very mature | not a realistic host |
+| Native bridge quality | `WebMessagePort`, typed, exactly as wide as we make it | Rust `invoke` commands, then Kotlin via plugin plumbing | JS plugin layer over Kotlin | n/a |
+| WebView behaviour | system WebView, direct `WebSettings` control | system WebView via `wry` | system WebView | bundles a whole browser engine |
+| Extra toolchain | none — JDK + Android SDK | **Rust + Android NDK + cargo-mobile** | Node + Capacitor CLI | enormous |
+| Path to a foreground service | direct | through Tauri's generated Android project | through a plugin | n/a |
+| Total moving parts | Kotlin only | Kotlin **+** Rust **+** Tauri | Kotlin **+** JS plugin layer | n/a |
+
+**Rejected — Tauri v2.** Genuinely production-capable on Android as of 2026, and
+not rejected on capability grounds. Rejected because it adds a Rust and NDK
+toolchain to CI and an indirection layer in front of Android services we must
+write in Kotlin anyway, buying nothing in return: our UI is already built by vite,
+so Tauri's main contribution — packaging a web app — is the part we least need.
+Its cross-platform story is also irrelevant here, since upstream already ships
+desktop via Electron. Noted separately: upstream's desktop **was** Tauri and
+migrated to Electron (`packages/desktop/src/main/migrate.ts`), so there is no
+Tauri investment upstream for us to reuse.
+
+**Rejected — Capacitor.** Mature on Android, but it is a JS-centric wrapper whose
+value is its plugin ecosystem. We need a handful of bespoke capabilities
+(foreground-service runtime, Keystore, SAF) that we would write as custom plugins
+in Kotlin regardless. That is the native path plus a layer.
+
+**Rejected — embedded CEF / GeckoView.** Bundling a browser engine adds tens of
+megabytes to an APK that must also carry a JS runtime. Disproportionate.
+
+**Rejected — native UI rewrite (Compose / React Native / Flutter).** Excluded by
+the charter. It would discard the entire shared UI and create unbounded
+divergence.
+
+**Consequences.**
+
+- CI needs only JDK 21 and the Android SDK — already what `android-ci.yml` provisions.
+- The bridge surface is ours to define and keep minimal (`docs/ARCHITECTURE.md` §2.4).
+- No framework upgrade treadmill beyond AGP/Kotlin/androidx.
+- We own more low-level code than a framework would give us — accepted, because
+  that code is exactly the part that must be right for lifecycle and security.
+
+---
+
+## ADR-0010 — Android project layout
+
+- **Date:** 2026-08-18 · **Milestone:** M1 · **Status:** Accepted
+
+**Decision.**
+
+- **`packages/android/`** — the SolidJS renderer package (`@opencode-ai/android`),
+  mirroring `packages/desktop/src/renderer`.
+- **`apps/android/`** — the Gradle project.
+
+**Rationale.** Upstream's `workspaces.packages` already includes the glob
+`packages/*`, so a package placed there joins the Bun workspace and resolves
+`@opencode-ai/app`, the shared `catalog:`, `patchedDependencies`, and `overrides`
+**with no edit to upstream's root `package.json`**. Conversely `apps/*` matches no
+upstream workspace glob, so Bun ignores the Gradle project entirely rather than
+trying to interpret it as a package.
+
+**Consequences.** The Android renderer is built exactly like the desktop
+renderer — its own `index.html` and vite root, with `@opencode-ai/app/vite` as the
+plugin. Vite output is copied into `apps/android/app/src/main/assets/web/` at
+build time and is git-ignored.
+
+---
+
+## ADR-0011 — Android toolchain and API levels
+
+- **Date:** 2026-08-18 · **Milestone:** M1 · **Status:** Accepted (revisit `minSdk` at M6)
+
+**Decision.**
+
+| Setting | Value | Reason |
+|---|---|---|
+| JDK | **21** | Already provisioned in CI and present in cloud sessions (`openjdk 21.0.10`). |
+| Gradle | **8.14.3+** via committed wrapper | Matches the version available locally; the wrapper is the source of truth. |
+| AGP | **8.x**, latest stable compatible with the wrapper | |
+| Kotlin | latest stable supported by the chosen AGP | |
+| `compileSdk` / `targetSdk` | **36** | Stay current; Play requires a recent target and W^X behaviour is already in force. |
+| `minSdk` | **26** (Android 8.0) | Modern process, filesystem, and notification-channel behaviour. Below 26 the foreground-service and notification model diverges enough to cost real complexity. |
+| Primary ABI | **`arm64-v8a`** | Real devices. `x86_64` may be added for emulator CI only. |
+
+**Note.** `minSdk` may need to rise if M6's runtime choice requires it. That is a
+legitimate reason to revisit; reach is not.
+
 ## Open questions (not yet ADRs)
 
 | # | Question | Decide at |
 |---|---|---|
-| Q1 | `minSdk`, `compileSdk`, AGP, Gradle, Kotlin versions | M1 |
-| Q2 | Android project location (`apps/android/` suggested) | M1/M2 |
-| Q3 | Are shared-UI packages published to npm, or workspace-only? | M1 |
-| Q4 | Shared UI assets bundled in the APK vs. downloaded | M3 |
-| Q5 | Terminal/PTY viability on Android | M6/M8 |
+| ~~Q1~~ | ~~Toolchain and API levels~~ | **Resolved — ADR-0011** |
+| ~~Q2~~ | ~~Android project location~~ | **Resolved — ADR-0010** |
+| ~~Q3~~ | ~~Are shared-UI packages published to npm?~~ | **Resolved — no. See ADR-0002** |
+| ~~Q4~~ | ~~Assets bundled vs. downloaded~~ | **Resolved — bundled. Forced by W^X (ADR-0007) and required for offline use** |
+| Q5 | Terminal/PTY viability on Android (`@lydell/node-pty` is native; WebSocket transport confirmed) | M6/M8 |
 | Q6 | SQLite data-at-rest encryption | M10 |
 | Q7 | Distribution channel (Play Store, GitHub Releases, F-Droid) | M11 |
+| Q8 | `EmbeddedProcessRuntime` (exec `lib*.so`) vs `EmbeddedInProcessRuntime` (JNI in a `:opencode` process) | M6 |
+| Q9 | Does SSE over `fetch` + `ReadableStream` work reliably in Android WebView? | M5 — verify on a real device |

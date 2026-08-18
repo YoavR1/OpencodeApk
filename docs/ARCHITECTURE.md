@@ -132,19 +132,15 @@ type PlatformName = "web" | "desktop"                    // ~line 20
 
 type PlatformBase = {
   version?: string
-  openExternal(url: string): void
-  restart(): Promise<void>
-  notify(title: string, description?: string, onClick?: () => void): Promise<void>
+  openExternal(url: string): void                        // required
+  restart(): Promise<void>                               // required
+  notify(title, description?, onClick?): Promise<void>   // required
   storage?(name?: string): SyncStorage | AsyncStorage
   draftStore?: DraftStore
   fetch?: typeof fetch
   getDefaultServer?(): Promise<ServerConnection.Key | null>
   setDefaultServer?(url: ServerConnection.Key | null): Promise<void> | void
-  openPath?(...): Promise<void>          // desktop only
-  revealPath?(...): Promise<boolean>     // desktop only
-  updater?: UpdaterPlatform              // desktop only
-  wslServers?: WslServersPlatform        // desktop only
-  ... (many more, all optional)
+  ... (~25 more, all optional; several desktop-only)
 }
 
 export type Platform = PlatformBase & (                  // ~line 126
@@ -153,16 +149,8 @@ export type Platform = PlatformBase & (                  // ~line 126
 )
 ```
 
-Provided via `PlatformProvider`, consumed via `usePlatform()`. Exported publicly
-from `packages/app/src/index.ts`.
-
-The design is already correct for us: **most capabilities are optional**, so a new
-platform implements what it can. `packages/app/src/entry.tsx` constructs the
-`"web"` platform — a worked example of a minimal implementation.
-
-**The one required upstream change** is widening `PlatformName` and the `Platform`
-union to admit `"android"`. That is a small, mechanical, upstreamable edit. It is
-the first entry in the divergence ledger.
+**Only three methods are required**: `openExternal`, `restart`, `notify`.
+Everything else is optional, and shared UI guards each with a capability check.
 
 ### Extension point 2 — the `ServerConnection` abstraction
 
@@ -171,46 +159,62 @@ the first entry in the divergence ledger.
 ```ts
 export namespace ServerConnection {
   export type HttpBase = { url: string; username?: string; password?: string }
-
   export type Http    = { type: "http"; http: HttpBase; authToken?: boolean } & Base
   export type Sidecar = { type: "sidecar"; http: HttpBase }
                       & ({ variant: "base" } | { variant: "wsl"; distro: string }) & Base
   export type Ssh     = { type: "ssh"; host: string; http: HttpBase } & Base
-
   export type Any = Http | (Sidecar | Ssh)
 
-  export const key = (conn: Any): Key => ...
-  export const builtin = (conn: Any) => conn.type === "sidecar" && conn.variant === "base"
+  export const builtin = (conn) => conn.type === "sidecar" && conn.variant === "base"
+  export const local   = (conn?) => !!conn && (builtin(conn)
+                       || (conn.type === "http" && isLocalHost(conn.http.url) === "local"))
 }
 ```
 
-Clients are built from it in `packages/app/src/utils/server.ts`:
+`ServerConnection.local()` (line 241) is what shared UI uses to decide whether a
+server is "local". A `{ type: "sidecar", variant: "base" }` connection is local
+**by definition** — so Android's on-device server gets correct treatment with no
+upstream change.
 
-```ts
-createSdkForServer({ server: ServerConnection.HttpBase, ... })  // -> @opencode-ai/sdk client
-createApiForServer({ server, fetch? })                          // -> @opencode-ai/client
-// both attach: Authorization: Basic base64(username:password)
+Clients are built in `packages/app/src/utils/server.ts` — `createSdkForServer`,
+`createApiForServer` — which attach `Authorization: Basic base64(username:password)`.
+
+## 1.5 How the desktop actually boots (VERIFIED, M1)
+
+The full chain, which is the blueprint for Android:
+
+```
+electron.vite.config.ts
+  main    : src/main/index.ts + src/main/sidecar.ts
+            plugin maps  virtual:opencode-server  ->  ../opencode/dist/node/node.js
+            plugin copies *.wasm from dist/node into out/main/chunks/
+  preload : src/preload/index.ts  -> contextBridge  window.api  (58 methods)
+  renderer: root src/renderer, plugins [ @opencode-ai/app/vite ]
+            publicDir ../../../app/public
 ```
 
-**This is the "one connection abstraction" the charter requires, and it already
-exists upstream.** Local and remote are the same type with different contents.
+**The desktop main process loads the Node build output** (`dist/node/node.js`) —
+upstream already runs the very artifact ADR-0007 proposes for Android. It also
+copies `.wasm` files alongside it, confirming WASM assets are part of that build.
 
-## 1.5 The desktop sidecar pattern (the model to port)
-
-`packages/desktop/src/main/sidecar.ts` runs the server in a separate process:
+`src/main/index.ts` (~line 365):
 
 ```ts
-const { Server } = await import("virtual:opencode-server")
-listener = await Server.listen({
-  port: command.port,
-  hostname: command.hostname,
-  username: "opencode",
-  password: command.password,
-  cors: ["oc://renderer"],
+const port = <bind :0 on 127.0.0.1, read address.port, close>
+const hostname = "127.0.0.1"
+const url = `http://${hostname}:${port}`
+const password = randomUUID()
+const { listener, health } = await spawnLocalServer(hostname, port, password, {
+  userDataPath: app.getPath("userData"), onStdout, onStderr, onExit,
 })
+Deferred.succeed(serverReady, { url, username: "opencode", password })
+await health.wait  // 30s timeout
 ```
 
-with environment prepared beforehand:
+`src/main/server.ts` — `utilityProcess.fork(sidecar.js)`, then
+`postMessage({ type: "start", hostname, port, password, userDataPath })`.
+
+`src/main/sidecar.ts` — sets env, then:
 
 ```ts
 Object.assign(process.env, {
@@ -218,111 +222,462 @@ Object.assign(process.env, {
   OPENCODE_SERVER_PASSWORD: password,
   XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? userDataPath,
 })
+const { Server } = await import("virtual:opencode-server")
+listener = await Server.listen({ port, hostname, username: "opencode", password,
+                                cors: ["oc://renderer"] })
 ```
 
-The renderer runs on the custom origin `oc://renderer`, which is why that origin
-is the CORS allowlist entry. It talks to the loopback server with Basic auth.
+Health check (`server.ts:186`): `GET /api/health`, falling back to
+`/global/health`, with `Authorization: Basic base64("opencode:"+password)`,
+polled every 100ms.
 
-**Generalised pattern:**
+The ready payload crossing into the renderer is exactly:
 
-1. Host generates a per-launch password.
-2. Host starts the server out-of-process on loopback.
-3. Host passes the webview's origin as the CORS allowlist.
-4. Webview client connects with Basic auth to the returned URL.
-5. Host stops the process on shutdown.
+```ts
+type ServerReadyData = { url: string; username: string | null; password: string | null }
+```
 
-Android reproduces this with a Service and a WebView. **Nothing of Electron
-itself is ported.**
+### The renderer composition
+
+`src/renderer/index.tsx` (452 lines) is a thin shell over `@opencode-ai/app`:
+
+```tsx
+<PlatformProvider value={platform}>
+  <AppBaseProviders locale={...} onNativeTranslations={...}>
+    <AppInterface defaultServer={key} servers={servers()} router={router}
+                  startup={...} serverScoped={...}>
+      <Inner />
+    </AppInterface>
+  </AppBaseProviders>
+</PlatformProvider>
+```
+
+and it turns `ServerReadyData` into a connection:
+
+```ts
+{ displayName: t("desktop.server.local"), type: "sidecar", variant: "base",
+  http: { url: data.url, username: data.username, password: data.password } }
+```
+
+**Android reproduces this file's shape almost exactly.** That is the whole job of
+the Android renderer package.
+
+### The renderer origin
+
+`src/main/windows.ts:35` registers a privileged custom scheme:
+
+```ts
+protocol.registerSchemesAsPrivileged([{ scheme: rendererProtocol,
+  privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } }])
+```
+
+served by `protocol.handle` with path-traversal rejection, and `webPreferences`
+of `{ contextIsolation: true, nodeIntegration: false, sandbox: true }`.
+
+`secure + standard + supportFetchAPI + stream` is precisely what
+`WebViewAssetLoader` provides on Android over `https://`. This is the direct
+justification for ADR-0008.
+
+## 1.6 Electron leakage into shared UI — VERIFIED near-zero
+
+Measured across `packages/app/src`, `packages/session-ui/src`, `packages/ui/src`:
+
+| Probe | Hits |
+|---|---|
+| `window.api`, `from "electron"`, `ipcRenderer` | **1** (plus 1 unrelated test string) |
+| `from "node:*"` | **0** |
+
+The single hit is `packages/app/src/app.tsx:404`:
+
+```ts
+void window.api?.setTitlebar?.({ mode, scheme })
+```
+
+Fully optional-chained — a silent no-op when `window.api` is absent. **No Electron
+API is reachable from the shared app.** The `Platform` object is the entire
+surface. This is the strongest single piece of evidence that the port is viable
+with near-zero divergence.
+
+## 1.7 Platform-name branching — the real divergence driver
+
+28 sites branch on `platform.platform`, **all inside `packages/app/src`** (none in
+`session-ui` or `ui`). Representative:
+
+```
+components/titlebar.tsx:78-81      macos / windows / linux / web
+components/session/open-in-app.tsx:172   === "desktop" && !!platform.openPath && server.isLocal()
+components/help-button.tsx:22      === "desktop" && os === "windows"
+app.tsx:332                        === "desktop" && platform.exportDebugLogs
+context/settings.tsx:315           !== "web"
+utils/persist.ts:532,533,547,579   storage scoping
+```
+
+Most are `=== "desktop" && <capability check>`, which degrade correctly for an
+unknown platform. **The exception that matters** is `utils/persist.ts`:
+
+```ts
+const isDesktop = platform.platform === "desktop" && !!platform.storage   // :547, :579
+```
+
+If Android reported `platform: "web"`, its native `storage` implementation would
+be **silently ignored** and persistence would fall back to `localStorage`. This is
+why Android must be a real platform name rather than masquerading as `"web"`, and
+why the fix in `persist.ts` should be a *capability* check (`!!platform.storage`)
+rather than a platform-name check — a change that is also an upstream improvement.
+
+## 1.8 Streaming transports — VERIFIED
+
+Two, and only two:
+
+| Transport | Where | Auth | Android WebView notes |
+|---|---|---|---|
+| **SSE** (`text/event-stream`) | `packages/client/src/generated/client.ts:196` — consumed via `fetch` + `response.body.getReader()`, **not** `EventSource` | Normal request headers, so `Authorization: Basic` works | Requires `fetch` streaming (`ReadableStream` response bodies), available in modern Chromium WebView. **Must be verified on a real device in M5.** |
+| **WebSocket** | `packages/app/src/components/terminal.tsx:620`; server `packages/server/src/handlers/pty.ts:165` via `ctx.request.upgrade` | Cannot send headers from browser JS, so upstream passes a **ticket** plus `username`/`password`/`authToken` in the URL (`terminalWebSocketURL`), matched by `hasPtyConnectTicketURL` in `middleware/authorization.ts` | Terminal only. Not required before M8. |
+
+Because SSE is fetch-based rather than `EventSource`-based, Basic auth on the
+event stream works without any upstream change. That is a significant piece of
+luck for this port.
+
+## 1.9 CORS
+
+`packages/server/src/cors.ts` allows by default: `http://localhost:*`,
+`http://127.0.0.1:*`, `oc://renderer`, the three `tauri://` origin forms, and
+`*.opencode.ai`. Anything else must arrive through `opts.cors` — which
+`Server.listen()` accepts. The Android WebView origin will be passed that way.
+
+## 1.10 Publication status of shared packages — VERIFIED, decisive
+
+Queried against the npm registry:
+
+| Package | Registry status |
+|---|---|
+| `@opencode-ai/app` | **NOT PUBLISHED** |
+| `@opencode-ai/session-ui` | **NOT PUBLISHED** |
+| `@opencode-ai/ui` | published, `1.18.18` |
+| `@opencode-ai/sdk` | published, `1.18.18` |
+| `@opencode-ai/client` | published, but `0.0.0` (placeholder) |
+
+Additionally, `packages/app/package.json` exports **raw TypeScript**
+(`"." : "./src/index.ts"`) and its build depends on `@opencode-ai/app/vite`, which
+pulls in `vite-plugin-solid` and `@tailwindcss/vite`.
+
+**Consequence:** the shared application cannot be consumed from npm. Any Android
+UI must be built *inside the upstream Bun workspace*, exactly as `packages/desktop`
+is. This single fact eliminates one ADR-0002 option outright and reshapes the rest.
+
+## 1.11 Historical note: the desktop was previously Tauri
+
+`packages/desktop/src/main/migrate.ts` migrates Tauri-era stores into the Electron
+store; `script/raw-changelog.ts:137` still maps `packages/desktop/src-tauri/`; a
+`tauri-linux` container image remains in `packages/containers`. The `tauri://`
+CORS entries are residue of that era.
+
+Upstream evaluated Tauri for desktop and moved to Electron. The reasons are likely
+desktop-specific (updater, signing, WSL, tray) and are **not** direct evidence
+about Android — but it does mean upstream carries no Tauri Android investment we
+could reuse.
 
 ---
 
-# Part 2 — Target Android architecture (TO BUILD)
+# Part 2 — Target Android architecture (DECIDED IN M1)
 
-Status: **design, not yet implemented.** Details are settled per milestone and
-recorded in `docs/DECISIONS.md`.
+Status: **designed and decided; not yet implemented.** Implementation starts at M2.
 
-## 2.1 Layering
+## 2.1 Shell decision — native Android WebView
+
+**Decided: a native Android application (Kotlin) hosting the shared UI in a
+`WebView` served by `androidx.webkit.WebViewAssetLoader`.** Rationale and rejected
+alternatives are in ADR-0009.
+
+## 2.2 Module and package layout — decided
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│ Android app  (Kotlin)                                      │
-│   MainActivity · WebView host                              │
-│   OpencodeService (foreground service)  ── owns runtime    │
-│   SecureCredentialStore (Keystore)                         │
-│   SafDocumentBridge (project folders)                      │
-└──────────────────────────┬─────────────────────────────────┘
-                           │  narrow typed bridge (WebMessagePort)
-┌──────────────────────────┴─────────────────────────────────┐
-│ Android Platform adapter  (TypeScript)                     │
-│   implements upstream `Platform` with platform: "android"  │
-└──────────────────────────┬─────────────────────────────────┘
-                           │
-┌──────────────────────────┴─────────────────────────────────┐
-│ Shared OpenCode UI  (unmodified upstream)                  │
-│   @opencode-ai/app · session-ui · ui   (SolidJS)           │
-└──────────────────────────┬─────────────────────────────────┘
-                           │  ServerConnection + generated SDK (Basic auth)
-┌──────────────────────────┴─────────────────────────────────┐
-│ OpenCode server                                            │
-│   M5:  remote, over the network      (type: "http")        │
-│   M7:  on-device, 127.0.0.1          (sidecar-shaped)      │
-└────────────────────────────────────────────────────────────┘
+/                                   repo root == upstream workspace root (after M2 vendoring)
+│
+├── CLAUDE.md  docs/  prompts/  scripts/  .claude/       our control layer (no upstream collision)
+├── .github/workflows/android-ci.yml                     ours; upstream's 23 workflows untouched
+│
+├── packages/                                            upstream, unmodified except platform.tsx
+│   ├── app/  session-ui/  ui/  client/  sdk/  core/  server/  opencode/  desktop/ …
+│   │
+│   └── android/                          NEW  @opencode-ai/android   (renderer package)
+│       ├── package.json                       inside the packages/* glob -> no root edit needed
+│       ├── vite.config.ts                     uses @opencode-ai/app/vite, mirrors desktop
+│       ├── index.html
+│       └── src/
+│           ├── index.tsx                      Android renderer entry (mirrors desktop renderer)
+│           ├── platform.ts                    Android `Platform` implementation
+│           └── bridge.ts                      typed JS half of the native bridge
+│
+└── apps/                                 NEW  (deliberately outside the bun workspace globs)
+    └── android/                               Gradle project
+        ├── settings.gradle.kts
+        ├── gradle/libs.versions.toml
+        ├── gradlew  gradle/wrapper/
+        └── app/src/
+            ├── main/AndroidManifest.xml
+            ├── main/res/xml/network_security_config.xml
+            ├── main/kotlin/ai/opencode/android/
+            │   ├── MainActivity.kt
+            │   ├── web/         WebViewHost, AssetLoader wiring, BridgePort
+            │   ├── runtime/     OpencodeRuntime interface + implementations + Service
+            │   └── security/    Keystore-backed credential store
+            ├── main/assets/web/                vite output, generated, git-ignored
+            ├── test/                           JVM unit tests
+            └── androidTest/                    instrumented tests
 ```
 
-Dependencies point downward only. Shared UI never imports Android code.
+Two deliberate choices:
 
-## 2.2 Connection modes — one abstraction, two fillings
+- **`packages/android/`** — upstream's `workspaces.packages` already contains the
+  glob `packages/*`, so a package placed there joins the Bun workspace with
+  **zero edits to upstream's root `package.json`**, and resolves `@opencode-ai/app`,
+  the shared catalog, patches, and overrides exactly as `packages/desktop` does.
+- **`apps/android/`** — `apps/*` matches **no** upstream workspace glob, so Bun
+  ignores the Gradle project entirely. Keeping Gradle out of the JS workspace
+  avoids `bun install` trying to interpret it.
 
-| Mode | Milestone | `ServerConnection` value |
+## 2.3 Layering
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ apps/android  (Kotlin)                                       │
+│   MainActivity ── WebViewHost ── WebViewAssetLoader          │
+│   OpencodeService (foreground, android:process=":opencode")  │
+│   OpencodeRuntime (interface)  ── credential store (Keystore)│
+└───────────────────────────┬──────────────────────────────────┘
+                            │ BridgePort: typed messages over WebMessagePort
+┌───────────────────────────┴──────────────────────────────────┐
+│ packages/android  (TypeScript / SolidJS)                     │
+│   bridge.ts  ── platform.ts  (implements upstream `Platform`)│
+│   index.tsx  ── PlatformProvider / AppBaseProviders /        │
+│                 AppInterface                                 │
+└───────────────────────────┬──────────────────────────────────┘
+                            │
+┌───────────────────────────┴──────────────────────────────────┐
+│ packages/app · session-ui · ui   (upstream, unmodified)      │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ ServerConnection + generated SDK (Basic auth)
+┌───────────────────────────┴──────────────────────────────────┐
+│ OpenCode server — remote (M5) or on-device 127.0.0.1 (M7)    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## 2.4 The native bridge — `BridgePort`
+
+The desktop exposes 58 methods on `window.api`. Android needs far fewer, because
+most are desktop-only. The bridge is a single typed request/response channel over
+`WebMessagePort` (preferred over `addJavascriptInterface`, which exposes a
+reflective surface).
+
+```ts
+// packages/android/src/bridge.ts
+type BridgeRequest =
+  | { id: number; method: "runtime.await";        params?: never }
+  | { id: number; method: "runtime.restart";      params?: never }
+  | { id: number; method: "store.get";            params: { name: string; key: string } }
+  | { id: number; method: "store.set";            params: { name: string; key: string; value: string } }
+  | { id: number; method: "store.delete";         params: { name: string; key: string } }
+  | { id: number; method: "store.clear";          params: { name: string } }
+  | { id: number; method: "store.keys";           params: { name: string } }
+  | { id: number; method: "notify";               params: { title: string; body?: string; tag: string } }
+  | { id: number; method: "openExternal";         params: { url: string } }
+  | { id: number; method: "pickDirectory";        params: { multiple?: boolean } }
+  | { id: number; method: "defaultServer.get";    params?: never }
+  | { id: number; method: "defaultServer.set";    params: { url: string | null } }
+
+type BridgeResponse =
+  | { id: number; ok: true;  result: unknown }
+  | { id: number; ok: false; error: { code: string; message: string } }
+
+type BridgeEvent =
+  | { event: "notification.clicked"; tag: string }
+  | { event: "runtime.state";        state: "starting" | "ready" | "failed"; message?: string }
+```
+
+`runtime.await` returns upstream's exact `ServerReadyData` shape:
+`{ url, username, password }`. Every inbound message is validated on the Kotlin
+side against this contract; anything unrecognised is rejected, never coerced.
+
+## 2.5 The local-runtime boundary — defined without choosing the runtime
+
+This is the seam that keeps M5 and M7 on one code path, and keeps M6 free to pick
+any implementation.
+
+```kotlin
+// apps/android/app/src/main/kotlin/ai/opencode/android/runtime/OpencodeRuntime.kt
+
+data class RuntimeConfig(
+    val hostname: String = "127.0.0.1",
+    val port: Int = 0,                     // 0 = ephemeral; resolved during start
+    val username: String = "opencode",
+    val password: String,                  // per-launch, generated, never persisted
+    val stateDir: File,                    // becomes XDG_STATE_HOME
+    val corsOrigins: List<String>,         // the WebView asset origin
+)
+
+/** Mirrors upstream `ServerReadyData` exactly. */
+data class RuntimeHandle(val url: String, val username: String?, val password: String?)
+
+sealed interface RuntimeState {
+    data object Stopped : RuntimeState
+    data object Starting : RuntimeState
+    data class Ready(val handle: RuntimeHandle) : RuntimeState
+    data class Failed(val cause: Throwable) : RuntimeState
+}
+
+interface OpencodeRuntime {
+    val state: StateFlow<RuntimeState>
+    suspend fun start(config: RuntimeConfig): RuntimeHandle
+    suspend fun stop()
+}
+```
+
+Health checking is shared by all implementations and copied from desktop
+(`packages/desktop/src/main/server.ts:186`): poll `GET /api/health`, falling back
+to `/global/health`, with `Authorization: Basic base64("opencode:" + password)`,
+every 100 ms, with a bounded timeout.
+
+Three implementations are anticipated, and **the UI cannot tell them apart**:
+
+| Implementation | Milestone | What it does |
 |---|---|---|
-| Remote (checkpoint) | M5 | `{ type: "http", http: { url: "https://…", username, password } }` |
-| Local on-device (goal) | M7 | sidecar-shaped: `{ http: { url: "http://127.0.0.1:<port>", username: "opencode", password: <per-launch> } }` |
+| `RemoteRuntime` | M5 | Starts nothing. Returns a user-configured `RuntimeHandle`. The connection is built as `ServerConnection.Http`. |
+| `EmbeddedProcessRuntime` | M7 candidate | `ProcessBuilder` on a runtime binary shipped as `lib*.so`, closest analogue to Electron's `utilityProcess.fork`. |
+| `EmbeddedInProcessRuntime` | M7 candidate | Runtime loaded via JNI inside a separate Android process (`android:process=":opencode"`), giving process isolation through Android rather than through `exec`. |
 
-Switching modes changes a value. It must not change a code path.
+M6 chooses between the two embedded variants **on evidence**. Both satisfy the
+same interface, so M7 integration work does not depend on which wins.
 
-## 2.3 WebView and origin
+### Hard Android constraint discovered in M1: W^X
 
-- Shared UI is built (`vite build`, `packages/app`) and shipped in APK assets.
-- Served through `WebViewAssetLoader` on an `https://` app origin rather than
-  `file://`, so fetch/CORS/storage behave normally.
-- That exact origin is passed as the `cors` option to `Server.listen()`.
-- Cleartext to `127.0.0.1` is permitted narrowly via a network security config —
-  never globally.
+Since **Android 10 (API 29)**, an app targeting API 29+ **cannot `exec()` a file
+located in its writable data directory** — this is a W^X (write-xor-execute)
+enforcement. Downloading or unpacking a runtime at first launch and executing it
+is therefore **not viable**.
 
-## 2.4 On-device runtime — open question, decided in M6
+The supported approach is to ship the executable inside the APK as a native
+library — named `lib<something>.so` under `jniLibs/<abi>/` — and execute it from
+`context.applicationInfo.nativeLibraryDir`, which is read-only and exec-permitted.
+Never hard-code that path; always read `nativeLibraryDir`.
 
-The end goal requires the OpenCode server on the device. Candidate approaches,
-**all unproven until M6 produces evidence**:
+Consequences that bind M6 and M7:
 
-| # | Approach | Basis | Main risk |
+1. The runtime **must be bundled in the APK**, which settles Q4 in favour of
+   bundling and makes APK size a first-class measurement in M6.
+2. `android:extractNativeLibs` and page-alignment interact with this; M6 must
+   record what it actually needed.
+3. `EmbeddedInProcessRuntime` (JNI) sidesteps `exec` entirely and is not subject
+   to this restriction — a genuine argument in its favour that M6 must weigh
+   against the isolation benefits of a real child process.
+
+## 2.6 Connection modes — one abstraction, three fillings
+
+| Mode | Milestone | `ServerConnection` value | `ServerConnection.local()` |
 |---|---|---|---|
-| A | Node-compatible runtime embedded in the APK, running `dist/node` | `build-node.ts` already targets Node; `effect-sqlite-node` exists | Android ARM64 Node builds; native module gaps |
-| B | Bun embedded as an ARM64 Android binary | Upstream is Bun-first | Bun does not target Android officially |
-| C | Port the server to a JS engine already on Android | No extra binary | Node/Bun API surface in `core` is large |
-| D | JVM/native reimplementation of the server | Native | Violates "reuse upstream"; enormous divergence |
+| Remote | M5 | `{ type: "http", http: { url, username, password } }` | false (unless the URL is loopback) |
+| On-device | M7 | `{ type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:<port>", username: "opencode", password } }` | **true**, via `builtin()` |
 
-Current leaning is **A**, on the strength of the existing Node build target and
-the Node SQLite adapter. This is a **hypothesis**. M6 exists to test it, and to
-enumerate what breaks: PTY (`@lydell/node-pty`), file watching
-(`@parcel/watcher`), and native tree-sitter grammars — with `web-tree-sitter`
-(WASM) as the known-portable fallback for the last.
+Switching modes changes a value produced by `RuntimeHandle`. It changes no code path.
 
-M6 must produce a written feasibility report with artifacts before M7 begins.
+## 2.7 WebView configuration
 
-## 2.5 Lifecycle model
+- Assets served by `WebViewAssetLoader` on `https://appassets.androidplatform.net/`
+  (or a project-specific domain), giving a secure, standard, fetch- and
+  stream-capable origin — the Android equivalent of the desktop's privileged
+  `oc://renderer` scheme.
+- That exact origin is passed to `Server.listen({ cors: [...] })`.
+- `javaScriptEnabled = true`; `allowFileAccessFromFileURLs = false`;
+  `allowUniversalAccessFromFileURLs = false`; `allowFileAccess = false`.
+- Cleartext permitted **only** to `127.0.0.1`, via
+  `res/xml/network_security_config.xml`. Never `usesCleartextTraffic="true"`.
+- SSE arrives over `fetch` + `ReadableStream`; M5 must verify this end to end on a
+  real device, since it is the one transport assumption the whole UI depends on.
 
-- The server runs inside a **foreground service** so an in-flight agent turn is
-  not killed when the app is backgrounded.
-- The Activity/WebView is treated as disposable: it can be destroyed and recreated
-  at any time and must reconnect and rehydrate from the server.
-- Server state lives in app-private storage and survives process death; a restarted
-  server reattaches to the same data directory.
-- Configuration changes must not restart the server.
+## 2.8 Security posture
 
-## 2.6 Security posture
+Unchanged from M0 and now grounded in the verified desktop behaviour: loopback
+bind, per-launch `randomUUID()`-equivalent password held in memory only, Basic
+auth enforced even on loopback (other Android apps can reach loopback ports),
+Keystore-backed provider credentials, minimal validated bridge surface, SAF for
+project folders, no root, no broad storage permission.
 
-- Loopback binding by default; auth on even on loopback.
-- Per-launch server password, in memory, never persisted, never logged.
-- Provider credentials in Keystore-backed storage.
-- The JS bridge surface is minimal, typed, and validates every input.
-- No root. No broad storage permission. Project access via SAF.
+---
+
+# Part 3 — Platform capability matrix
+
+Every member of upstream's `PlatformBase` / `Platform`, its desktop implementation,
+and the Android disposition. Derived from `packages/app/src/context/platform.tsx`
+and `packages/desktop/src/renderer/index.tsx`.
+
+**Disposition key**
+- **REUSE** — works with no Android-specific code; the web/default path is correct.
+- **ADAPT** — needs an Android implementation behind the bridge.
+- **OMIT** — desktop-only; leave undefined. Shared UI already guards it.
+- **DEFER** — adapt later; named milestone.
+
+| Member | Req? | Desktop implementation | Android | Milestone | Notes |
+|---|---|---|---|---|---|
+| `platform` | ✔ | `"desktop"` | **ADAPT** → `"android"` | M3 | Requires widening `PlatformName` + the `Platform` union. The only mandatory upstream edit. |
+| `os` | – | `macos`/`windows`/`linux` from UA | **OMIT** | — | Only meaningful on the `"desktop"` arm. |
+| `version` | – | `pkg.version` | **ADAPT** | M3 | From `BuildConfig.VERSION_NAME`. |
+| `openExternal` | **✔** | `window.api.openExternal` | **ADAPT** | M3 | `Intent.ACTION_VIEW`. Validate scheme — upstream web allows only `http:`/`https:`/`mailto:`. |
+| `restart` | **✔** | kill sidecar, then `relaunch()` | **ADAPT** | M3 | Stop runtime, recreate Activity. |
+| `notify` | **✔** | Web `Notification` + focus checks | **ADAPT** | M4 | `NotificationManagerCompat`; tap → `notification.clicked` event. Needs `POST_NOTIFICATIONS` on API 33+. |
+| `storage` | – | `window.api.store*` (electron-store) | **ADAPT** | M4 | `AsyncStorage` over the bridge. **Blocked by the `persist.ts` platform check — see below.** |
+| `draftStore` | – | `createDraftStore({...window.api.draft*})` | **ADAPT** | M4 | `createDraftStore` is exported from `@opencode-ai/app`; supply get/set/remove/putBlob/getBlob. |
+| `fetch` | – | passthrough to global `fetch` | **REUSE** | — | WebView `fetch` is fine; omit to use the default. |
+| `getDefaultServer` / `setDefaultServer` | – | `window.api.*DefaultServerUrl` | **ADAPT** | M4 | Persist selected server across launches. |
+| `windowID` | – | `window.api.getWindowID()` | **OMIT** | — | Android is single-window. `persist.ts` falls back to `"browser"`. |
+| `openDirectoryPickerDialog` | ✔ on desktop arm | native dialog | **ADAPT** | M4 | SAF `ACTION_OPEN_DOCUMENT_TREE` with persisted permissions. Not on the `"android"` arm's required set — decide in M3 whether to mirror desktop's requirement. |
+| `openAttachmentPickerDialog` | – | native file picker + token-scoped reads | **DEFER** | M8 | SAF `ACTION_OPEN_DOCUMENT`. |
+| `getPathForFile` | – | `WeakMap` + `window.api` | **OMIT** | — | No real filesystem paths under SAF. |
+| `saveFilePickerDialog` | – | native save dialog | **DEFER** | M8 | SAF `ACTION_CREATE_DOCUMENT`. |
+| `openPath` | – | `window.api.openPath` | **OMIT** | — | Guarded by `!!platform.openPath` at 3 call sites. |
+| `openLocalFile` | – | `window.api.openLocalFile` | **OMIT** | — | |
+| `revealPath` | – | `window.api.revealPath` | **OMIT** | — | No file manager contract on Android. |
+| `checkAppExists` | – | `window.api.checkAppExists` | **OMIT** | — | "Open in editor" is desktop-only. |
+| `readClipboardImage` | – | `window.api.readClipboardImage` | **DEFER** | M4 | WebView paste may cover this; measure before building it. |
+| `updater` | – | electron-updater | **OMIT** | M11 | Android updates are a distribution concern, not an in-app one. |
+| `wslServers` | – | Windows only | **OMIT** | — | |
+| `getDisplayBackend` / `setDisplayBackend` | – | Linux Wayland/X11 | **OMIT** | — | |
+| `webviewZoom`, `getPinchZoomEnabled`, `setPinchZoomEnabled` | – | Electron zoom | **OMIT** | — | Android WebView handles pinch natively. |
+| `windowFullscreen` | – | Electron window state | **OMIT** | — | |
+| `runDesktopMenuAction` | – | app menu | **OMIT** | — | No menu bar on Android. |
+| `setForceFocus` | – | devtools focus | **OMIT** | — | Debug affordance. |
+| `exportDebugLogs` | – | `window.api.exportDebugLogs` | **DEFER** | M9 | Valuable for phone-only debugging — worth adding once logging exists. |
+| `recordFatalRendererError` | – | writes to desktop logs | **DEFER** | M9 | Same reason. |
+
+## Summary
+
+| Disposition | Count |
+|---|---|
+| ADAPT (real Android work) | 10 |
+| OMIT (desktop-only, guarded upstream) | 14 |
+| DEFER (later milestone) | 5 |
+| REUSE (no work) | 1 |
+
+Ten adapters, of which **three are required** by the type (`openExternal`,
+`restart`, `notify`) and the rest are capability-gated. M3 needs only
+`platform`, `version`, and the three required methods to boot the UI.
+
+## The one shared-UI change worth making
+
+`packages/app/src/utils/persist.ts:547` and `:579`:
+
+```ts
+const isDesktop = platform.platform === "desktop" && !!platform.storage
+```
+
+The `platform.platform === "desktop"` half makes an otherwise perfectly good
+capability check platform-specific. With Android reporting `"android"`, the
+Android `storage` adapter would be ignored and persistence would silently fall
+back to `localStorage` inside the WebView — losable on cache clear.
+
+Preferred fix (M4), which is also an upstream improvement:
+
+```ts
+const isDesktop = !!platform.storage        // capability, not identity
+```
+
+Logged as divergence D3 in `docs/UPSTREAM_SYNC.md` and worth proposing upstream.

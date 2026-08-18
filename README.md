@@ -10,11 +10,12 @@ server required for the core experience.
 
 ## Status
 
-**M0 (bootstrap) complete.** This repository currently contains a project-control
-layer only — no application code yet. See **[`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)**
-for the authoritative state.
+**M1 (architecture audit) complete.** This repository currently contains a
+project-control layer and a decided architecture — no application code yet. See
+**[`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)** for the authoritative state.
 
-Next milestone: **M1 — architecture audit** (`prompts/01_ARCHITECTURE_AUDIT.md`).
+Next milestone: **M2 — first Android APK shell** (`prompts/02_ANDROID_SHELL.md`),
+which begins by vendoring upstream OpenCode into this repository.
 
 ## Start here
 

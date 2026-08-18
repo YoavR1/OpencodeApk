@@ -12,7 +12,7 @@ warning system for the project's biggest long-term risk: unbounded merge cost.
 | **Repository** | `https://github.com/anomalyco/opencode` |
 | **License** | MIT |
 | **Default branch** | `dev` (upstream CI targets `dev`) |
-| **Integration mechanism** | **Not yet decided** — ADR-0002, decided in M1 |
+| **Integration mechanism** | **Vendor upstream history into this repository** (ADR-0002, decided M1). Upstream added as a git remote; bumps are `git fetch upstream && git merge upstream/dev`. |
 
 ## Current pin
 
@@ -21,10 +21,11 @@ warning system for the project's biggest long-term risk: unbounded merge cost.
 | **Commit** | `4e81a0b` |
 | **Subject** | `fix(console): preserve inference sessions (#43124)` |
 | **Audited** | 2026-08-18 (M0) |
-| **Integrated** | ❌ **Not yet.** Read for the M0 architecture audit only. |
+| **Integrated** | ❌ **Not yet.** Read for the M0 and M1 audits. Vendoring merge is the **first task of M2**. |
 
-At M0 the upstream was cloned to a scratch path for reading. **No upstream code
-is present in this repository.** Integration happens in M1 once ADR-0002 is decided.
+Upstream was cloned to a scratch path for reading in M0 and re-read in depth in
+M1. **No upstream code is present in this repository yet.** ADR-0002 is now
+decided, and the merge happens at the start of M2.
 
 ---
 
@@ -39,10 +40,22 @@ a liability: it must be re-applied and re-verified on every upstream bump.
 |---|---|---|---|---|
 | D1 | `packages/app/src/context/platform.tsx` (~line 20) | Widen `type PlatformName = "web" \| "desktop"` to include `"android"` | M3 | Yes — mechanical union widening |
 | D2 | `packages/app/src/context/platform.tsx` (~line 126) | Add an `{ platform: "android"; … }` arm to the `Platform` union | M3 | Yes |
+| D3 | `packages/app/src/utils/persist.ts` (lines 547, 579) | `platform.platform === "desktop" && !!platform.storage` → `!!platform.storage` | M4 | **Yes — a genuine improvement.** Turns an identity check into a capability check. Worth proposing upstream. |
+| D4 | `README.md` | Keep ours; upstream's is replaced at the vendoring merge | M2 | No — project identity |
+| D5 | `.gitignore` | Upstream's, plus our Android/secrets section | M2 | No — additive, trivial to re-merge |
 
-**Anticipated divergence budget: 1 file, 2 edits.** M1 must confirm this is the
-complete list. If it grows beyond a handful of mechanical edits, ADR-0002 should
-be re-opened in favour of a fork (see the trade-off table in `docs/DECISIONS.md`).
+**Measured divergence budget: 2 upstream source files, 3 edits, plus 2 trivial
+root-file merges.** Measured in M1 by auditing all 28 `platform.platform`
+branch sites across `packages/app`, `packages/session-ui`, and `packages/ui`.
+
+Why D3 matters: without it, Android's native `storage` adapter is silently
+ignored and persistence falls back to WebView `localStorage`, which is losable on
+cache clear. It is a functional bug, not a cosmetic one.
+
+Everything else Android needs is **additive** — new files under `packages/android/`
+and `apps/android/`, which never conflict on an upstream merge. Notably,
+`packages/android/` falls inside upstream's existing `packages/*` workspace glob,
+so **upstream's root `package.json` needs no edit at all**.
 
 ### Applied
 
@@ -69,6 +82,15 @@ bump; the paths are the check.
 | U10 | Sidecar pattern: password + loopback + CORS + Basic auth | `packages/desktop/src/main/sidecar.ts` | The model M7 ports |
 | U11 | Root `test` script deliberately exits 1 | root `package.json` | CI must never call it |
 | U12 | Package manager is `bun@1.3.14` | root `package.json#packageManager` | Reproducible installs |
+| U13 | `packages/*` is a workspace glob | root `package.json#workspaces.packages` | Lets `packages/android/` join the workspace with zero root edits (ADR-0010) |
+| U14 | Shared UI reaches no Electron API | 1 optional-chained `window.api?.setTitlebar?.()` at `packages/app/src/app.tsx:404`; 0 `node:` imports in app/session-ui/ui | The port is viable at near-zero divergence |
+| U15 | SSE is consumed via `fetch` + `ReadableStream`, not `EventSource` | `packages/client/src/generated/client.ts:196` | Basic auth works on the event stream with no upstream change |
+| U16 | Terminal uses WebSocket with URL-borne ticket auth | `packages/app/src/components/terminal.tsx:620`; `packages/server/src/handlers/pty.ts:165` | M8 terminal transport |
+| U17 | `ServerConnection.local()` is true for `sidecar`/`variant:"base"` | `packages/app/src/context/server.tsx:241` | Android's on-device server is treated as local with no upstream change |
+| U18 | Ready payload shape `{ url, username, password }` | `packages/desktop/src/preload/types.ts:19` (`ServerReadyData`) | The Android runtime boundary mirrors it exactly |
+| U19 | Health endpoints `/api/health`, fallback `/global/health` | `packages/desktop/src/main/server.ts:186` | Android runtime readiness check |
+| U20 | `@opencode-ai/app` and `session-ui` are unpublished; `app` exports raw TS | npm registry; `packages/app/package.json` | Forces in-workspace builds — the basis of ADR-0002 |
+| U21 | Desktop main loads `dist/node/node.js` | `packages/desktop/electron.vite.config.ts` (`virtual:opencode-server`) | Upstream already runs the artifact ADR-0007 proposes for Android |
 
 ---
 

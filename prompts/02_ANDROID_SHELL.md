@@ -20,22 +20,62 @@ A **real, installable APK**. The content is a placeholder; the build is not.
 
 This is the first milestone that produces something you can put on a phone.
 
+## Decisions already made — do not re-litigate these
+
+M1 settled these with evidence. Read `docs/DECISIONS.md` for the reasoning.
+
+| | Decision | ADR |
+|---|---|---|
+| Integration | Vendor upstream history into this repo | 0002 |
+| Shell | Native Kotlin + `WebView` + `WebViewAssetLoader` | 0009 |
+| Layout | `packages/android/` (renderer) + `apps/android/` (Gradle) | 0010 |
+| Toolchain | JDK 21, `compileSdk` 36, `minSdk` 26, `arm64-v8a` | 0011 |
+
+If evidence appears that contradicts one, say so and record it — but do not
+quietly substitute a different choice.
+
 ## Tasks
 
-1. **Create the Android Gradle project** at the location decided in M1
-   (`apps/android/` suggested), with a **committed Gradle wrapper**
-   (`gradlew`, `gradlew.bat`, `gradle/wrapper/**`). The wrapper is what flips
-   `.github/workflows/android-ci.yml` out of its pre-M2 phase state.
+0. **Vendor upstream first (ADR-0002).**
 
-2. Use a **version catalog** (`gradle/libs.versions.toml`). Kotlin. AGP, Gradle,
-   `minSdk`, and `compileSdk` exactly as decided in M1.
+   ```bash
+   git remote add upstream https://github.com/anomalyco/opencode
+   git fetch upstream dev
+   git merge upstream/dev --allow-unrelated-histories
+   ```
+
+   Exactly two conflicts are expected:
+   - `README.md` → keep ours (divergence D4)
+   - `.gitignore` → upstream's, plus our Android/secrets section (D5)
+
+   **A third conflict means the M1 measurement was wrong** — record it in
+   `docs/UPSTREAM_SYNC.md` and reassess before continuing.
+
+   Commit the merge on its own, so the Android work is reviewable separately.
+
+   Then run `bun install --frozen-lockfile`. If the cloud proxy blocks it, record
+   the actual error as BLOCKED and let CI be the authority — do **not** drop
+   `--frozen-lockfile` or regenerate the lockfile.
+
+1. **Create the Android Gradle project** at `apps/android/` with a **committed
+   Gradle wrapper** (`gradlew`, `gradlew.bat`, `gradle/wrapper/**`). The wrapper is
+   what flips `.github/workflows/android-ci.yml` out of its pre-M2 phase state.
+
+2. Use a **version catalog** (`gradle/libs.versions.toml`). Kotlin. Versions per
+   ADR-0011.
 
 3. **`MainActivity` hosting a `WebView`** showing a placeholder page bundled in
    assets. Not a remote URL.
 
-4. **`WebViewAssetLoader`** so assets are served on an `https://` app origin
-   rather than `file://` (ADR-0008). Keep `setAllowFileAccessFromFileURLs` and
+4. **`WebViewAssetLoader`** (`androidx.webkit`) so assets are served on an
+   `https://` app origin rather than `file://` (ADR-0008). This mirrors the
+   desktop's privileged `oc://renderer` scheme, which is registered with
+   `{ secure, standard, supportFetchAPI, stream }` — the same four properties
+   `WebViewAssetLoader` gives you. Keep `setAllowFileAccessFromFileURLs` and
    `setAllowUniversalAccessFromFileURLs` **false**.
+
+   Note the origin you choose; it must later be passed to
+   `Server.listen({ cors: [...] })`.
 
 5. **Network security config** permitting cleartext to `127.0.0.1` only. Do not
    set `usesCleartextTraffic="true"` globally.
@@ -66,13 +106,18 @@ without an ADR: `MANAGE_EXTERNAL_STORAGE`, and anything else in the deny list in
 
 ## Exit criteria
 
-See M2 in `docs/IMPLEMENTATION_PLAN.md`. In short: `assembleDebug`, `lint`, and
-`test` pass **in CI**; the debug APK is uploaded as an artifact;
-`scripts/ci/verify-apk.sh` passes; the APK installs and launches.
+`docs/IMPLEMENTATION_PLAN.md` M2 now carries the **exact** checklist, covering the
+vendoring merge, the Android build, the correctness of the shell's security
+settings, and device installation. Work through it literally.
 
 Installation and launch need device evidence. If I have not given you a device
 report, mark that criterion **BLOCKED** and tell me to install the artifact and
 report back (`docs/PHONE_WORKFLOW.md`).
+
+## A note on scope
+
+M2 is a **placeholder** page in a real APK. Do not pull the shared OpenCode UI in —
+that is M3, and it depends on the `platform.tsx` widening that M2 does not do.
 
 ## Finish the session with
 

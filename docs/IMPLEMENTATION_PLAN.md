@@ -9,8 +9,8 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M | Name | Prompt | Status |
 |---|---|---|---|
 | M0 | Baseline / bootstrap | `prompts/00_BOOTSTRAP.md` | **complete** |
-| M1 | Architecture audit | `prompts/01_ARCHITECTURE_AUDIT.md` | next |
-| M2 | First Android APK shell | `prompts/02_ANDROID_SHELL.md` | not started |
+| M1 | Architecture audit | `prompts/01_ARCHITECTURE_AUDIT.md` | **complete** |
+| M2 | First Android APK shell | `prompts/02_ANDROID_SHELL.md` | next |
 | M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | not started |
 | M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | not started |
 | M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | not started |
@@ -63,13 +63,23 @@ real code; baseline checks run and recorded.
 6. Choose `minSdk`, `compileSdk`, JDK, and AGP/Gradle versions (ADR).
 
 **Exit criteria**
-- [ ] ADR-0002 decided and recorded with the evidence behind it.
-- [ ] Definitive list of upstream files requiring modification, in `UPSTREAM_SYNC.md`.
-- [ ] A reproducible command that produces shared-UI static assets — or a recorded
-      blocker with the actual error.
-- [ ] Runtime-requirement inventory for `core`/`server` written into `ARCHITECTURE.md`.
-- [ ] Android toolchain versions decided (ADR).
-- [ ] `CURRENT_STATUS.md` updated.
+- [x] ADR-0002 decided and recorded with the evidence behind it — *vendor upstream
+      history; decided by the npm-publication measurement.*
+- [x] Definitive list of upstream files requiring modification, in `UPSTREAM_SYNC.md`
+      — *D1–D5: 2 source files, 3 edits, 2 trivial root merges.*
+- [~] A reproducible command producing shared-UI static assets — **deferred to M3**.
+      Upstream is not vendored yet, so no build could be run. The *mechanism* is
+      established (own vite root + `@opencode-ai/app/vite`, exactly as
+      `packages/desktop`); proving it is M3's first job.
+- [x] Runtime-requirement inventory written into `ARCHITECTURE.md` — *including the
+      W^X constraint, which materially changes the M6/M7 option space.*
+- [x] Android toolchain versions decided — *ADR-0011.*
+- [x] `CURRENT_STATUS.md` updated.
+
+Additionally delivered beyond the original criteria: the Android shell decision
+(ADR-0009), the project layout (ADR-0010), the platform capability matrix
+(`ARCHITECTURE.md` Part 3), the `BridgePort` message contract, and the
+`OpencodeRuntime` boundary.
 
 ---
 
@@ -78,8 +88,20 @@ real code; baseline checks run and recorded.
 **Goal:** a real, installable APK. Minimal content; real build.
 
 **Tasks**
-1. Create the Android Gradle project (location per ADR; suggested `apps/android/`)
-   with a committed Gradle wrapper.
+
+0. **Vendor upstream (ADR-0002) — do this first.**
+   ```
+   git remote add upstream https://github.com/anomalyco/opencode
+   git fetch upstream dev
+   git merge upstream/dev --allow-unrelated-histories
+   ```
+   Resolve exactly two conflicts: keep our `README.md` (D4); take upstream's
+   `.gitignore` plus our Android/secrets section (D5). Commit the merge on its own.
+   Then confirm `bun install --frozen-lockfile` behaves — if the cloud proxy blocks
+   it, record that and let CI be the authority.
+
+1. Create the Android Gradle project at `apps/android/` (ADR-0010) with a
+   **committed Gradle wrapper**.
 2. `MainActivity` hosting a `WebView` with a placeholder page.
 3. Version catalog (`gradle/libs.versions.toml`); Kotlin; AGP per M1 ADR.
 4. `WebViewAssetLoader` wired so assets are served on an `https://` app origin.
@@ -89,14 +111,43 @@ real code; baseline checks run and recorded.
 8. Confirm `android-ci.yml` flips from "pre-M2 phase state" to a real build and
    uploads `app-debug.apk`.
 
-**Exit criteria**
-- [ ] `./gradlew assembleDebug` succeeds in CI.
-- [ ] Debug APK uploaded as a CI artifact.
-- [ ] `./gradlew lint` and `./gradlew test` pass in CI.
-- [ ] The APK installs and launches (device or CI emulator evidence).
-- [ ] `verify-apk.sh` confirms package name, `arm64-v8a` presence, and no
-      forbidden permissions.
-- [ ] `CURRENT_STATUS.md` updated.
+**Exit criteria (exact)**
+
+*Vendoring*
+- [ ] `git log` shows the upstream merge; `packages/app/src/context/platform.tsx`
+      exists at the expected path.
+- [ ] Exactly two files conflicted (`README.md`, `.gitignore`) and both are
+      resolved as recorded in D4/D5. Any third conflict is recorded in
+      `UPSTREAM_SYNC.md` before proceeding.
+- [ ] Upstream's own workflows are present and unmodified.
+- [ ] `bun install --frozen-lockfile` succeeds, **or** its failure is recorded
+      verbatim as BLOCKED with CI as the authority.
+
+*Android build*
+- [ ] `apps/android/gradlew` is committed and executable.
+- [ ] `scripts/ci/build-android.sh` exits **0** in CI (no longer 3).
+- [ ] `./gradlew lint` passes with no new baseline suppressions.
+- [ ] `./gradlew test` passes and runs **at least one real JVM test**.
+- [ ] `./gradlew assembleDebug` produces `app-debug.apk`.
+- [ ] The APK is uploaded as the `app-debug-apk` CI artifact.
+- [ ] `scripts/ci/verify-apk.sh` exits **0**: dex present, manifest present, and
+      **no forbidden permission**.
+- [ ] The CI `android` job runs and `android build (pre-M2 phase)` no longer runs.
+
+*Correctness of the shell*
+- [ ] `WebViewAssetLoader` serves the placeholder over an `https://` app origin —
+      asserted by an instrumented test, not by inspection.
+- [ ] `network_security_config.xml` permits cleartext to `127.0.0.1` only;
+      `usesCleartextTraffic` is not set globally.
+- [ ] `allowFileAccessFromFileURLs` and `allowUniversalAccessFromFileURLs` are
+      both `false`.
+- [ ] `minSdk` 26 / `compileSdk` 36 / JDK 21 per ADR-0011.
+
+*Device*
+- [ ] The APK installs and launches on a real phone. Needs a device report from
+      the user — mark **BLOCKED** if absent rather than assuming.
+
+- [ ] `CURRENT_STATUS.md` and `docs/TEST_MATRIX.md` updated.
 
 ---
 
