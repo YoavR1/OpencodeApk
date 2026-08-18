@@ -10,6 +10,7 @@
 | **Session** | M2 Android shell |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
 | **Current milestone** | **M2 — complete except device verification** |
+| **CI** | ✅ green — [run 32122205783](https://github.com/YoavR1/OpencodeApk/actions/runs/32122205783) |
 | **Next milestone** | **M3 — shared OpenCode UI** |
 | **Next prompt** | **`prompts/03_SHARED_UI.md`** |
 
@@ -23,6 +24,51 @@ UI is not in it yet — that is M3.
 
 Upstream OpenCode is still **not** vendored into this repository. That moved from
 M2 to M3 (ADR-0012).
+
+---
+
+## CI — VERIFIED green
+
+Run [32122205783](https://github.com/YoavR1/OpencodeApk/actions/runs/32122205783) on `df00cf3`:
+
+```
+detect phase                                        success
+repo hygiene                                        success
+android build                                       success
+  Setup Android SDK                                 success
+  Install required Android SDK packages             success
+  Build (lintDebug, testDebugUnitTest, assembleDebug)  success   (22s)
+  Verify APK                                        success
+  Upload debug APK                                  success
+opencode workspace checks                           skipped  (no upstream yet)
+android build (pre-M2 phase)                        skipped  (Gradle project now exists)
+```
+
+Artifacts:
+
+| Name | Size |
+|---|---|
+| **`opencode-android-debug`** | 3,483,186 bytes |
+| `android-reports` | 33,417 bytes (lint + test reports) |
+
+The phase-state design worked exactly as intended: `android build (pre-M2 phase)`
+stopped running the moment a Gradle wrapper existed, and the real `android build`
+took over.
+
+### The CI failures on the way here, and what they were
+
+Two real problems, both fixed rather than worked around:
+
+1. **AGP 8.13.2 was the wrong choice** — `androidx.core:core:1.19.0` requires
+   AGP 9.1+ and `compileSdk` 37. ADR-0011 is corrected with the evidence.
+2. **The first AGP 9 run hung.** The build step ran 35+ minutes on a build that
+   takes ~22 seconds. AGP will fetch missing SDK packages itself, and that path
+   can block on a licence prompt with no terminal attached. Fixed three ways: CI
+   installs `platforms;android-37.0` and `build-tools;37.0.0` explicitly,
+   `android.builder.sdkDownload=false` stops AGP taking that path at all, and
+   `timeout-minutes: 25` bounds any future hang.
+
+The same build then finished in **22 seconds**.
 
 ---
 

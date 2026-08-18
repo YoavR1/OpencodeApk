@@ -112,7 +112,7 @@ Upstream's own tests, run per-package. **Never** via the root `test` script.
 | `lintDebug` passes | `scripts/ci/build-android.sh` | M2 | ✅ |
 | `testDebugUnitTest` passes | `scripts/ci/build-android.sh` | M2 | ✅ |
 | `assembleDebug` succeeds | `scripts/ci/build-android.sh` | M2 | ✅ |
-| Debug APK uploaded as `opencode-android-debug` | `android-ci.yml` | M2 | ✅ |
+| Debug APK uploaded as `opencode-android-debug` | `android-ci.yml` | M2 | ✅ 3,483,186 bytes, run 32122205783 |
 | APK is non-empty (≥100 KB) | `scripts/ci/verify-apk.sh` | M2 | ✅ |
 | Application id is `ai.opencode.android` | `scripts/ci/verify-apk.sh` | M2 | ✅ |
 | APK declares a launchable activity | `scripts/ci/verify-apk.sh` | M2 | ✅ |
