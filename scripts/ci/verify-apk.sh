@@ -79,15 +79,23 @@ fi
 
 LISTING="$(unzip -l "$APK" 2>/dev/null)" || { bad "APK is not a readable zip archive"; exit 1; }
 
+# Everything below searches $LISTING with a herestring rather than
+# `printf ... | grep`. With `set -o pipefail`, `grep -q` exiting early on a match
+# closes the pipe, `printf` dies of SIGPIPE, and the whole pipeline reports
+# failure even though the match SUCCEEDED. That turned a correct 16 MB APK into
+# "no classes.dex / manifest missing / assets missing" - three false failures at
+# once. It only appeared once the APK grew large enough for printf not to finish
+# first, which is exactly the kind of bug that hides until it matters.
+
 # ------------------------------------------------------------------- contents
 head2 "contents"
-if printf '%s' "$LISTING" | grep -q 'classes.*\.dex'; then
+if grep -q 'classes.*\.dex' <<< "$LISTING"; then
   good "dex classes present"
 else
   bad "no classes.dex -- this APK contains no code"
 fi
 
-if printf '%s' "$LISTING" | grep -q 'AndroidManifest.xml'; then
+if grep -q 'AndroidManifest.xml' <<< "$LISTING"; then
   good "AndroidManifest.xml present"
 else
   bad "AndroidManifest.xml missing"
@@ -97,9 +105,9 @@ fi
 # From M3 the APK must carry the shared OpenCode UI. An APK without it installs
 # and launches to a blank screen, which is the most misleading kind of "success".
 head2 "shared UI assets"
-if printf '%s' "$LISTING" | grep -q 'assets/web/index.html'; then
+if grep -q 'assets/web/index.html' <<< "$LISTING"; then
   good "assets/web/index.html present"
-  WEB_FILES="$(printf '%s' "$LISTING" | grep -c 'assets/web/' || true)"
+  WEB_FILES="$(grep -c 'assets/web/' <<< "$LISTING" || true)"
   say "       $WEB_FILES file(s) under assets/web/"
   if [ "$WEB_FILES" -lt 2 ]; then
     bad "only $WEB_FILES file under assets/web/ - a real vite build emits JS and CSS too"
@@ -110,13 +118,13 @@ fi
 
 # ------------------------------------------------------------------ native ABI
 head2 "native ABIs"
-ABIS="$(printf '%s' "$LISTING" | grep -oE 'lib/[a-z0-9_-]+/' | cut -d/ -f2 | sort -u)"
+ABIS="$(grep -oE 'lib/[a-z0-9_-]+/' <<< "$LISTING" | cut -d/ -f2 | sort -u)"
 if [ -z "$ABIS" ]; then
   say "no native libraries in this APK (pure-JVM build)"
   say "NOTE: once an on-device runtime ships (M7), arm64-v8a becomes mandatory."
 else
-  say "found: $(printf '%s' "$ABIS" | tr '\n' ' ')"
-  if printf '%s' "$ABIS" | grep -qx 'arm64-v8a'; then
+  say "found: $(tr '\n' ' ' <<< "$ABIS")"
+  if grep -qx 'arm64-v8a' <<< "$ABIS"; then
     good "arm64-v8a present (real-device ABI)"
   else
     bad "arm64-v8a MISSING. An x86_64-only APK is emulator-only and cannot"
@@ -136,13 +144,13 @@ fi
 if [ -z "$BADGING" ]; then
   warn "aapt/aapt2 unavailable - cannot read the application id (not treated as a pass)"
 else
-  ACTUAL_ID="$(printf '%s' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+  ACTUAL_ID="$(sed -n "s/^package: name='\([^']*\)'.*/\1/p" <<< "$BADGING" | head -1)"
   if [ "$ACTUAL_ID" = "$EXPECTED_APPLICATION_ID" ]; then
     good "application id is $ACTUAL_ID"
   else
     bad "application id is '$ACTUAL_ID', expected '$EXPECTED_APPLICATION_ID'"
   fi
-  LAUNCHABLE="$(printf '%s' "$BADGING" | grep -c "launchable-activity" || true)"
+  LAUNCHABLE="$(grep -c "launchable-activity" <<< "$BADGING" || true)"
   if [ "$LAUNCHABLE" -gt 0 ]; then
     good "APK declares a launchable activity"
   else
@@ -169,7 +177,7 @@ if [ -z "$PERMS" ]; then
 else
   FOUND=0
   for perm in $FORBIDDEN_PERMISSIONS; do
-    if printf '%s' "$PERMS" | grep -qF "$perm"; then
+    if grep -qF "$perm" <<< "$PERMS"; then
       bad "forbidden permission requested: $perm"
       FOUND=1
     fi
