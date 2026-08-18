@@ -16,8 +16,11 @@ coreKtx = "1.19.0"
 appcompat = "1.8.0"
 activity = "1.13.0"
 webkit = "1.17.0"
+lifecycle = "2.11.0"
+coroutines = "1.11.0"
 
 junit = "4.13.2"
+robolectric = "4.16.1"
 androidxTestJunit = "1.3.0"
 espresso = "3.7.0"
 
@@ -26,8 +29,16 @@ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = 
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activity" }
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
+# lifecycleScope, used to run bridge handlers with the Activity's lifetime.
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+# Dispatchers.IO, so disk-touching bridge handlers stay off the main thread.
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# Robolectric runs the JVM tests against real Android classes - SharedPreferences,
+# JSONObject, Base64 - rather than mocking the platform away and testing nothing.
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 androidx-test-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
 

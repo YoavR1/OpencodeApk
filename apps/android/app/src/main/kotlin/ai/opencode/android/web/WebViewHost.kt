@@ -9,8 +9,6 @@ import android.webkit.WebView
 import android.webkit.WebSettings
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
-import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import ai.opencode.android.BuildConfig
 import ai.opencode.android.util.SafeLog
 
@@ -23,8 +21,10 @@ import ai.opencode.android.util.SafeLog
  *  - file-URL access is disabled in both forms;
  *  - navigation away from the app origin is refused rather than followed.
  *
- * No JavaScript bridge is installed yet. That arrives in M3/M4 as a typed
- * `WebMessagePort` channel (docs/ARCHITECTURE.md 2.4).
+ * No JavaScript object is injected into the page. Native capabilities reach the
+ * renderer through a `WebMessagePort` opened by [BridgePort] once the document
+ * has loaded, which is why this class only reports `onPageFinished` rather than
+ * installing anything itself.
  */
 object WebViewHost {
 
@@ -32,14 +32,14 @@ object WebViewHost {
         webView: WebView,
         context: Context,
         onRendererGone: () -> Unit,
-        onRestart: () -> Unit,
+        onPageFinished: () -> Unit,
     ) {
         val loader = WebViewAssetLoader.Builder()
             .setDomain(WebOrigin.DOMAIN)
             .addPathHandler(WebOrigin.ASSET_PATH, WebAssetsHandler(context))
             .build()
 
-        webView.webViewClient = AssetClient(loader, onRendererGone)
+        webView.webViewClient = AssetClient(loader, onRendererGone, onPageFinished)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -65,38 +65,10 @@ object WebViewHost {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
 
-        installHostBridge(webView, context, onRestart)
-
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     }
 
-    /**
-     * Exposes `window.__OPENCODE_ANDROID__` to the renderer.
-     *
-     * The adapter script must run before the app bundle. `addDocumentStartJavaScript`
-     * guarantees that; where the WebView is too old to support it, injecting on
-     * page start is close enough, because the renderer reads the host lazily and
-     * only at render time. Either way the renderer treats the object as optional,
-     * so a failure here degrades to browser behaviour rather than a broken app.
-     */
-    private fun installHostBridge(webView: WebView, context: Context, onRestart: () -> Unit) {
-        webView.addJavascriptInterface(
-            AndroidHostBridge(context, onRestart),
-            AndroidHostBridge.INTERFACE_NAME,
-        )
 
-        val script = AndroidHostBridge.bootstrapScript()
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            WebViewCompat.addDocumentStartJavaScript(webView, script, setOf(WebOrigin.ORIGIN))
-            SafeLog.d("host bridge installed via document-start script")
-        } else {
-            SafeLog.w("DOCUMENT_START_SCRIPT unsupported; falling back to onPageStarted")
-            pendingBootstrap = script
-        }
-    }
-
-    /** Set only when the document-start API is unavailable. */
-    private var pendingBootstrap: String? = null
 
     /**
      * Serves the app from the origin root while keeping its files tidy inside the
@@ -128,11 +100,14 @@ object WebViewHost {
     private class AssetClient(
         private val loader: WebViewAssetLoader,
         private val onRendererGone: () -> Unit,
+        private val onPageFinished: () -> Unit,
     ) : WebViewClient() {
 
-        override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-            super.onPageStarted(view, url, favicon)
-            pendingBootstrap?.let { view.evaluateJavascript(it, null) }
+        override fun onPageFinished(view: WebView, url: String?) {
+            super.onPageFinished(view, url)
+            // The bridge port is delivered to a live document, so the channel can
+            // only be opened once the page has actually loaded.
+            if (WebOrigin.isAppOrigin(url)) onPageFinished()
         }
 
         override fun shouldInterceptRequest(

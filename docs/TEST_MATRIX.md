@@ -7,16 +7,24 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 
 ---
 
-## Current state (M3)
+## Current state (M4)
 
 | Layer | Status |
 |---|---|
-| Android JVM unit tests | ✅ 15 tests, run in CI by `testDebugUnitTest` |
+| Android JVM unit tests | ✅ **60 tests**, run in CI by `testDebugUnitTest` |
 | Android instrumented tests | ⚠️ 4 written, **not run** — no emulator job yet |
-| Renderer adapter tests | ✅ run in CI by `bun test --cwd packages/android` |
+| Renderer tests | ✅ **69 tests** across 5 files, run in CI by `bun test --cwd packages/android` |
+| Cross-language contract | ✅ TS ↔ Kotlin method lists compared mechanically |
 | Shared UI build | ✅ upstream vendored; `build-shared-ui.sh` gates the APK |
 | Integration tests | ⬜ |
 | Manual device verification | ⬜ awaiting a device report |
+
+**What no test here covers: the UI itself.** Every renderer test in this file
+exercises adapter and protocol logic. Nothing renders a component, because the
+shared UI cannot be built in this environment (`bun install` is blocked by the
+proxy — see `docs/CURRENT_STATUS.md`), so no narrow-viewport or on-device layout
+assertion exists yet. The mobile-layout claims in ADR-0016 are reasoned from
+upstream's source, not observed. CI builds the bundle; a device confirms it.
 
 **On the instrumented tests.** They are written and committed but no CI job runs
 them, so they are ⚠️ rather than ✅. An emulator job is deliberately deferred:
@@ -48,8 +56,26 @@ Fast, no device. Run by `./gradlew test`.
 | Log redaction | surrounding context preserved | M2 | ✅ |
 | Log redaction | `passwordless` not falsely redacted | M2 | ✅ |
 | Asset origin | **App is served from the origin root**, so the shared CSS's `/assets/…` font URLs resolve | M3 | ✅ |
-| Platform bridge | Message serialisation/deserialisation | M4 | ⬜ |
-| Platform bridge | Rejects malformed and out-of-contract messages | M4 | ⬜ |
+| Bridge contract | Well-formed request parses; params default to empty | M4 | ✅ |
+| Bridge contract | **9 malformed shapes refused** (no id, negative id, non-numeric id, no method, empty method, non-object, bad JSON, …) | M4 | ✅ |
+| Bridge contract | Wrong-typed `params` does not crash the parser | M4 | ✅ |
+| Bridge contract | Unknown methods parse but are not in `METHODS` | M4 | ✅ |
+| Bridge contract | `success`/`failure`/`event` envelope shapes; null result sent explicitly | M4 | ✅ |
+| Bridge contract | Events carry no `id`, so no promise resolves on one | M4 | ✅ |
+| Preferences | Round-trip, missing key, remove, clear, sorted keys | M4 | ✅ |
+| Preferences | Named stores do not share keys | M4 | ✅ |
+| Preferences | **Path traversal in a store name cannot escape the directory** | M4 | ✅ |
+| Preferences | A name of only dots is still a plain file; overlong names truncate | M4 | ✅ |
+| Drafts | Text round-trip; **survives a reopen** (stands in for process death) | M4 | ✅ |
+| Drafts | Blob round-trip with type; identical bytes share one id | M4 | ✅ |
+| Drafts | Ids are lowercase sha256 hex; missing type falls back | M4 | ✅ |
+| Drafts | **8 non-hash blob ids refused before touching disk** | M4 | ✅ |
+| Back | Press is offered to the renderer, not decided locally | M4 | ✅ |
+| Back | **A renderer that never answers still lets the user leave** | M4 | ✅ |
+| Back | A timeout after an answer does not exit | M4 | ✅ |
+| Back | **Stale and superseded replies are discarded** | M4 | ✅ |
+| Back | **An unsolicited `back.handled` cannot exit the app** | M4 | ✅ |
+| Back | No renderer ⇒ exit immediately rather than waiting out the timeout | M4 | ✅ |
 | Server connection | Local `ServerConnection` value construction | M7 | ⬜ |
 | Server connection | Basic-auth header construction | M5 | ⬜ |
 | Credential store | Store/retrieve/delete round-trip | M10 | ⬜ |
@@ -69,8 +95,10 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Shared UI | Upstream UI mounts and renders | M3 | ⬜ |
 | Platform adapter | `notify` produces a real notification | M4 | ⬜ |
 | Platform adapter | `openExternal` fires the right `Intent` | M4 | ⬜ |
-| Navigation | Android back button behaves correctly | M4 | ⬜ |
+| Navigation | Android back button behaves correctly | M4 | ⬜ policy unit-tested; end-to-end needs a device |
 | Input | Soft keyboard insets do not occlude input | M4 | ⬜ |
+| Layout | Mobile breakpoint activates at a phone viewport | M4 | ⬜ **the main unverified M4 claim** |
+| Layout | Hover-revealed controls are visible on touch | M4 | ⬜ |
 | Local server | Server starts and answers a health check | M7 | ⬜ |
 | Local server | Binds `127.0.0.1` only — external bind refused | M7/M10 | ⬜ |
 | Local server | Unauthenticated request is rejected | M10 | ⬜ |
@@ -100,6 +128,25 @@ Run per-package. **Never** via the root `test` script.
 | `openExternal` | **refuses `javascript:`, `intent:`, `file:`, `content:`** | M3 | ✅ |
 | `openExternal` | ignores malformed URLs without throwing | M3 | ✅ |
 | `version` | from the host, `undefined` outside it | M3 | ✅ |
+| Bridge | Request/response round-trip over a real `MessageChannel` | M4 | ✅ |
+| Bridge | Errors reject with a typed `BridgeError` | M4 | ✅ |
+| Bridge | Events dispatch to subscribers; unsubscribe works | M4 | ✅ |
+| Bridge | No host ⇒ `available` is false and calls reject rather than hang | M4 | ✅ |
+| Contract | **TS method union == Kotlin `METHODS`, checked in both directions** | M4 | ✅ |
+| Contract | Neither side declares a method twice | M4 | ✅ |
+| Contract | Guards against parsing nothing and comparing two empty lists | M4 | ✅ |
+| Back | Innermost handler runs first; declining passes the press on | M4 | ✅ |
+| Back | **A handler that throws does not trap the user** | M4 | ✅ |
+| Back | Unregistering removes only that handler; twice is harmless | M4 | ✅ |
+| Back | History cursor: push, replace, clamped `go`, forward-entry discard | M4 | ✅ |
+| Back | **Restoring a route at startup does not make back available** | M4 | ✅ |
+| Back | **`navigate(-1)` keeps the cursor in step** (it travels via `go`, not `set`) | M4 | ✅ |
+| Back | Topmost dialog is the one dismissed; none ⇒ press not consumed | M4 | ✅ |
+| Back | A document that cannot build the event declines rather than claiming the press | M4 | ✅ |
+| Focus | Text inputs, textareas and `contenteditable` take a keyboard | M4 | ✅ |
+| Focus | Checkboxes, buttons, ranges and `contenteditable=false` do not | M4 | ✅ |
+| Focus | Focused field is scrolled with `block: "nearest"` | M4 | ✅ |
+| Focus | An element that cannot scroll does not throw | M4 | ✅ |
 
 ### Upstream's own tests
 

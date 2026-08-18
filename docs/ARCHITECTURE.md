@@ -389,7 +389,7 @@ Status: **designed and decided; not yet implemented.** Implementation starts at 
 `WebView` served by `androidx.webkit.WebViewAssetLoader`.** Rationale and rejected
 alternatives are in ADR-0009.
 
-## 2.2 Module and package layout — **implemented in M3**
+## 2.2 Module and package layout — **implemented in M3, extended in M4**
 
 ```
 /                                   repo root == upstream workspace root (after M2 vendoring)
@@ -408,9 +408,13 @@ alternatives are in ADR-0009.
 │           ├── index.html                     vite root
 │           ├── main.tsx                       entry; mirrors the desktop renderer
 │           ├── platform.ts                    Android `Platform` implementation
+│           ├── bridge.ts                      typed WebMessagePort client        (M4)
+│           ├── back.ts                        back dispatcher + history cursor   (M4)
+│           ├── focus.ts                       keep the focused field visible     (M4)
+│           ├── drafts.ts                      draft store over the bridge        (M4)
 │           ├── capabilities.ts                SUPPORTED / DEGRADED / UNSUPPORTED
-│           ├── platform.test.ts               adapter contract tests
-│           └── styles.css                     shared design system + WebView fixes
+│           ├── *.test.ts                      adapter, bridge, back, focus, contract
+│           └── styles.css                     WebView fixes + hover-none overrides
 │
 └── apps/                                 NEW  (deliberately outside the bun workspace globs)
     └── android/                               Gradle project
@@ -422,6 +426,10 @@ alternatives are in ADR-0009.
             ├── main/res/xml/network_security_config.xml
             ├── main/kotlin/ai/opencode/android/
             │   ├── MainActivity.kt
+            │   ├── BackCoordinator.kt          back token/timeout policy      (M4)
+            │   ├── bridge/      BridgeContract (wire format), BridgeHost      (M4)
+            │   ├── platform/    PreferenceStore, DraftStore, SystemIntegration,
+            │   │                Notifications, DirectoryPicker                (M4)
             │   ├── web/         WebViewHost, AssetLoader wiring, BridgePort
             │   ├── runtime/     OpencodeRuntime interface + implementations + Service
             │   └── security/    Keystore-backed credential store
@@ -429,6 +437,9 @@ alternatives are in ADR-0009.
             ├── test/                           JVM unit tests
             └── androidTest/                    instrumented tests
 ```
+
+`runtime/` and `security/` are planned (M6–M7 and M10); everything else in the
+tree above exists today.
 
 Two deliberate choices:
 
@@ -493,59 +504,181 @@ absent, that every `DEGRADED` member exists and names a milestone, and that no
 capability appears in two categories — so a later "fix" that adds no-op stubs to
 silence a type error fails the suite.
 
-**Current DEGRADED entry: `notify`.** Android WebView exposes no Notification API,
-and native notifications need `POST_NOTIFICATIONS`, a channel, and a click route
-through the bridge — all M4. `Platform` requires `notify`, so it cannot be
-omitted; it is named instead.
+### The matrix as of M4
+
+| Capability | State | Backed by |
+|---|---|---|
+| `version` | ✅ | `host.info` → `BuildConfig.VERSION_NAME` |
+| `openExternal` | ✅ | `ACTION_VIEW`, scheme allowlist `{http, https, mailto}` re-checked host-side |
+| `restart` | ✅ | `Activity.recreate()` |
+| `fetch` | ✅ | WebView `fetch` (SSE over `ReadableStream`; see Q9) |
+| `notify` | ✅ | channel `opencode.sessions`, `POST_NOTIFICATIONS`, tag-correlated click |
+| `storage` | ✅ | named `SharedPreferences` (ADR-0015) |
+| `draftStore` | ✅ | preferences + SHA-256 content-addressed blobs in `filesDir` |
+| `getDefaultServer` / `setDefaultServer` | ✅ | preferences store `servers` |
+| `readClipboardImage` | ✅ | `ClipboardManager`, re-encoded to PNG |
+| `openDirectoryPickerDialog` | ✅ | SAF `OpenDocumentTree` + persistable permission |
+| `openAttachmentPickerDialog` | ❌ M8 | SAF `ACTION_OPEN_DOCUMENT` |
+| `saveFilePickerDialog` | ❌ M8 | SAF `ACTION_CREATE_DOCUMENT` |
+| `exportDebugLogs`, `recordFatalRendererError` | ❌ M9 | needs on-device logging first |
+| 16 desktop/window members | ❌ never | no Android equivalent; see `capabilities.ts` |
+
+`openDirectoryPickerDialog` is required rather than optional on the `desktop` arm
+of the `Platform` union, and Android supplies it, so the shared UI's directory
+flows work without a desktop-only branch.
+
+**As of M4 there are no DEGRADED entries.** `notify` was the last one; it
+graduated when the bridge gained a channel, a permission request and a
+tag-correlated click route. `Notifications.post` returns `false` when
+`POST_NOTIFICATIONS` is refused rather than reporting a notification it did not
+post, and the adapter drops the click handler when the host says so.
 
 ## 2.4 The native bridge — `BridgePort`
 
 The desktop exposes 58 methods on `window.api`. Android needs far fewer, because
 most are desktop-only.
 
-**M3 ships a deliberately minimal first version** (`AndroidHostBridge.kt`): three
-fire-and-forget members — `versionName`, `openExternal`, `restart` — injected as
-`window.__OPENCODE_ANDROID__` via `WebViewCompat.addDocumentStartJavaScript`, so
-it exists before the app bundle runs (with an `onPageStarted` fallback on older
-WebViews). The renderer treats the object as optional, so a failure to install it
-degrades to browser behaviour rather than a broken app.
+**M3 shipped a deliberately minimal first version**: three fire-and-forget
+members injected via `addJavascriptInterface`. **M4 replaced it** with the typed
+`WebMessagePort` channel described here; see ADR-0013 for why.
 
-`addJavascriptInterface` is acceptable at this size — three methods, no return
-values, each validating its own input. **`openExternal` re-checks the URL scheme
-on the Kotlin side** even though the renderer already checks it: the interface is
-reachable from any script in the WebView, so it must not trust its caller.
-
-**M4 replaces this with the typed `WebMessagePort` channel below**, when storage,
-drafts and pickers arrive and the surface stops being trivially small.
+The channel is one `WebMessagePort` pair. Kotlin keeps one end and posts the
+other into the page — scoped to the app origin, so no other origin can receive
+it — behind the handshake string `opencode:bridge-port`.
 
 ```ts
-// packages/android/src/bridge.ts
+// packages/android/src/bridge.ts — the renderer's half
 type BridgeRequest =
-  | { id: number; method: "runtime.await";        params?: never }
-  | { id: number; method: "runtime.restart";      params?: never }
-  | { id: number; method: "store.get";            params: { name: string; key: string } }
-  | { id: number; method: "store.set";            params: { name: string; key: string; value: string } }
-  | { id: number; method: "store.delete";         params: { name: string; key: string } }
-  | { id: number; method: "store.clear";          params: { name: string } }
-  | { id: number; method: "store.keys";           params: { name: string } }
-  | { id: number; method: "notify";               params: { title: string; body?: string; tag: string } }
-  | { id: number; method: "openExternal";         params: { url: string } }
-  | { id: number; method: "pickDirectory";        params: { multiple?: boolean } }
-  | { id: number; method: "defaultServer.get";    params?: never }
-  | { id: number; method: "defaultServer.set";    params: { url: string | null } }
-
-type BridgeResponse =
-  | { id: number; ok: true;  result: unknown }
-  | { id: number; ok: false; error: { code: string; message: string } }
+  // persistent preferences
+  | { method: "store.get";          params: { name: string; key: string } }
+  | { method: "store.set";          params: { name: string; key: string; value: string } }
+  | { method: "store.remove";       params: { name: string; key: string } }
+  | { method: "store.clear";        params: { name: string } }
+  | { method: "store.keys";         params: { name: string } }
+  // prompt drafts and their blobs
+  | { method: "draft.get";          params: { key: string } }
+  | { method: "draft.set";          params: { key: string; value: string } }
+  | { method: "draft.remove";       params: { key: string } }
+  | { method: "draft.putBlob";      params: { base64: string; type: string } }
+  | { method: "draft.getBlob";      params: { id: string } }
+  // system integration
+  | { method: "clipboard.readText"; params?: never }
+  | { method: "clipboard.writeText";params: { text: string } }
+  | { method: "clipboard.readImage";params?: never }
+  | { method: "share";              params: { text: string; title?: string } }
+  | { method: "openExternal";       params: { url: string } }
+  | { method: "pickDirectory";      params: { title?: string } }
+  | { method: "notify";             params: { title: string; body: string; tag: string } }
+  | { method: "restart";            params?: never }
+  // navigation
+  | { method: "back.handled";       params: { token: number; handled: boolean } }
+  // host facts
+  | { method: "host.info";          params?: never }
+  | { method: "defaultServer.get";  params?: never }
+  | { method: "defaultServer.set";  params: { url: string | null } }
 
 type BridgeEvent =
   | { event: "notification.clicked"; tag: string }
-  | { event: "runtime.state";        state: "starting" | "ready" | "failed"; message?: string }
+  | { event: "lifecycle";            state: "resumed" | "paused" | "stopped" }
+  | { event: "keyboard";             height: number }   // CSS px, 0 when hidden
+  | { event: "back";                 token: number }
 ```
 
-`runtime.await` returns upstream's exact `ServerReadyData` shape:
-`{ url, username, password }`. Every inbound message is validated on the Kotlin
-side against this contract; anything unrecognised is rejected, never coerced.
+Envelopes are `{"id":n,"ok":true,"result":…}` or
+`{"id":n,"ok":false,"error":{"code","message"}}`; events carry no `id`, so the
+renderer can never resolve a pending promise on one.
+
+Rules that hold across the whole surface:
+
+- **Unknown methods are refused by name.** `BridgeHost` checks against
+  `BridgeContract.METHODS` before dispatching, so a typo becomes a rejected
+  promise instead of one that never settles.
+- **Nothing trusts its caller.** Every message is attacker-shaped by definition:
+  `BridgeRequest.parse` returns null on anything malformed, `openExternal`
+  re-validates the URL scheme host-side against
+  `{http, https, mailto}`, store names are sanitised to a safe filename, and
+  blob ids must match `[0-9a-f]{64}` before being joined to a path.
+- **Disk work runs off the main thread** (`withIo`), because jank on a phone is a
+  defect, not a nuisance. `back.handled` is the deliberate exception: it races a
+  400 ms timeout and must not queue behind IO.
+- **A throwing handler still settles the promise.** The catch-all in `dispatch`
+  replies with `Failed` rather than leaving the UI waiting.
+- **The contract is written twice and checked mechanically.** The TypeScript
+  union and Kotlin's `METHODS` set cannot import each other, so
+  `packages/android/src/contract.test.ts` reads both files and fails on drift in
+  either direction.
+- **Port features are checked once**, in `BridgePort.connect()`, covering every
+  API the class will later use. A WebView missing any of them gets no bridge
+  rather than a half-working one.
+
+### What back does
+
+Back is the one capability whose decision cannot live in Kotlin at all; see
+ADR-0014. The Activity offers each press to the renderer as a `back` event and
+waits up to `BackCoordinator.TIMEOUT_MS` (400 ms) for a `back.handled` reply.
+
+```
+press → BackCoordinator (token)          apps/android/.../BackCoordinator.kt
+      → event "back"                     bridge
+      → BackDispatcher, innermost first  packages/android/src/back.ts
+          1. open dialog?    dispatch Escape, consume
+          2. drawer open?    layout.mobileSidebar.hide(), consume
+          3. route depth>0?  history.go(-1), consume
+          4. otherwise       decline
+      → "back.handled" {token, handled}
+      → handled ? stay : finish the Activity
+```
+
+Two invariants: **the user can always leave** (no answer within the timeout, or a
+handler that throws, exits anyway) and **a late answer never acts on a later
+screen** (tokens; stale replies are discarded).
+
+## 2.4a Mobile layout — upstream's responsive path, not a second one
+
+Inspecting the shared UI before writing a mobile layout changed what M4 needed to
+build. Upstream already ships one, and it is live by default:
+
+| Upstream mechanism | Where |
+|---|---|
+| `createMediaQuery("(max-width: 767px)")` breakpoint | `components/titlebar.tsx:75`, `pages/session.tsx`, `session-header.tsx` |
+| Off-canvas drawer with backdrop, `layout.mobileSidebar` | `context/layout.tsx:754`, `pages/layout.tsx:2331` |
+| Bottom titlebar option, `mobileTitlebarPosition` | `context/settings.tsx:424`, `titlebar.tsx:76` |
+| `hover-reveal` utility escaping hover-only reveals | `packages/ui/src/styles/tailwind/utilities.css:11` |
+| New layout on by default (`newLayoutDesignsDefault = true`) | `context/settings.tsx:61` |
+
+So the work was to make that path *apply* on Android, not to duplicate it
+(ADR-0016). Three things were needed:
+
+1. **`width=device-width`** in `packages/android/src/index.html`. Without it a
+   WebView reports a ~980 px CSS viewport and the 767 px breakpoint never fires —
+   the whole mobile path would sit there unused. The meta tag also carries
+   `viewport-fit=cover`, because the Activity is edge-to-edge and applies the
+   real insets itself.
+2. **A bottom titlebar by default** (D6). Upstream defaults to `"top"`, which is
+   right for a browser tab and wrong for a device held in one hand. Only the
+   default differs; the setting stays the user's.
+3. **An `@media (hover: none)` override** in `packages/android/src/styles.css`,
+   for the four sites that open-code `opacity-0 group-hover:opacity-100` instead
+   of using upstream's `hover-reveal`. Without it the "remove attachment" button
+   on a pasted image is invisible and unreachable on a phone. Keyed on the
+   absence of hover rather than on being Android, because that is the property
+   that actually breaks the interaction.
+
+### Insets, keyboard and focus
+
+`MainActivity.applyInsets` computes `keyboard = (ime.bottom - bars.bottom)`
+clamped at zero, pads the WebView by the system bars plus that, and emits the
+keyboard height in **CSS pixels** over the bridge. The renderer publishes it as
+`--android-keyboard-height` and `data-keyboard="open|closed"` on the root
+element, so the shared UI can react without knowing it is on Android.
+
+Padding the WebView is what makes layout correct — the layout viewport genuinely
+shrinks, so `100dvh` fits. It does not fix scroll position, which is why the same
+event triggers `revealFocusedInput()` on the next frame: a field near the bottom
+would otherwise end up behind the keyboard. Only elements a keyboard actually
+serves are scrolled (`focus.ts` excludes checkboxes, buttons, ranges and
+`contenteditable="false"`), and the scroll uses `block: "nearest"` so the caret
+does not jump away from where the user is looking.
 
 ## 2.5 The local-runtime boundary — defined without choosing the runtime
 

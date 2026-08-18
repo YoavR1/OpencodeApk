@@ -15,9 +15,19 @@
 
       Expected additions:
         INTERNET          - M5, for provider API calls through the OpenCode server
-        POST_NOTIFICATIONS- M4, for Platform.notify on API 33+
         FOREGROUND_SERVICE- M7, to keep an agent turn alive while backgrounded
     -->
+
+    <!--
+      POST_NOTIFICATIONS (M4): backs Platform.notify, which the shared UI uses to
+      tell the user a long-running agent turn finished while they were elsewhere.
+
+      Only meaningful from API 33; below that, posting needs no permission. It is
+      requested at runtime, once, and a refusal degrades notifications rather than
+      blocking the app - Notifications.post reports the refusal instead of
+      pretending to have posted.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".OpenCodeApplication"

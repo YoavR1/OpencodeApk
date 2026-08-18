@@ -12,7 +12,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M1 | Architecture audit | `prompts/01_ARCHITECTURE_AUDIT.md` | **complete** |
 | M2 | First Android APK shell | `prompts/02_ANDROID_SHELL.md` | next |
 | M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | not started |
-| M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | not started |
+| M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **code complete; device verification outstanding** |
 | M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | not started |
 | M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | not started |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | not started |
@@ -175,11 +175,14 @@ Additionally delivered beyond the original criteria: the Android shell decision
 5. Adapter contract tests on both sides of the bridge.
 
 **Exit criteria**
-- [ ] Every implemented `Platform` method has a test.
-- [ ] Bridge surface documented in `ARCHITECTURE.md` and minimal.
+- [x] Every implemented `Platform` method has a test.
+- [x] Bridge surface documented in `ARCHITECTURE.md` and minimal — 2.4, ADR-0013.
 - [ ] Android back button and soft keyboard behave correctly (instrumented tests).
-- [ ] No Android branching inside shared UI.
-- [ ] `CURRENT_STATUS.md` updated.
+      *Back policy is unit-tested on both sides (ADR-0014) and the keyboard path is
+      wired; neither has run on a device, and no emulator job exists.*
+- [x] No Android branching inside shared UI — the three upstream edits (D1/D2, D3,
+      D6) are a union widening, a capability check, and one default.
+- [x] `CURRENT_STATUS.md` updated.
 
 ---
 

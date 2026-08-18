@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OpenCode</string>
+
+    <!-- Notification channel shown in Android's per-app notification settings. -->
+    <string name="notification_channel_sessions">Sessions</string>
+    <string name="notification_channel_sessions_description">Updates about agent sessions, such as a turn finishing while the app is in the background.</string>
 </resources>

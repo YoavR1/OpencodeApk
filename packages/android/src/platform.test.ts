@@ -1,28 +1,66 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test"
+import type { Bridge, BridgeEvent, BridgeEventName, BridgeRequest } from "./bridge"
 import { createAndroidPlatform, DEGRADED, UNSUPPORTED, UnsupportedOnAndroidError, refuseUnsupported } from "./platform"
 
 /**
- * These tests protect the two properties requirement 4 of M3 is about:
+ * These tests protect the property M3 established and M4 has to keep:
  * unsupported capabilities stay *absent* rather than becoming silent no-ops,
  * and the capability declaration matches the implementation.
+ *
+ * They also cover the capabilities M4 added, at the bridge boundary — what the
+ * adapter asks the host for, and what it does with the answer.
  */
 
-/**
- * A minimal `window`, rather than a DOM library.
- *
- * The adapter only needs `addEventListener`, `open` and `location.reload`, so a
- * few stubs are cheaper and more explicit than pulling happy-dom in as a
- * dependency and changing the lockfile again. It also keeps these tests honest
- * about exactly which browser API surface the adapter touches.
- */
-function installFakeWindow() {
-  const fake = {
-    addEventListener: () => {},
-    open: () => null,
-    location: { reload: () => {} },
+type Recorded = { method: string; params?: unknown }
+
+/** A bridge that records requests and replies from a scripted table. */
+function fakeBridge(replies: Partial<Record<string, unknown>> = {}) {
+  const calls: Recorded[] = []
+  const handlers = new Map<string, Set<(payload: never) => void>>()
+
+  const bridge: Bridge = {
+    available: true,
+    request<T>(request: BridgeRequest): Promise<T> {
+      calls.push({ method: request.method, params: (request as { params?: unknown }).params })
+      if (request.method in replies) return Promise.resolve(replies[request.method] as T)
+      return Promise.resolve(undefined as T)
+    },
+    on(event, handler) {
+      let set = handlers.get(event)
+      if (!set) {
+        set = new Set()
+        handlers.set(event, set)
+      }
+      set.add(handler as (p: never) => void)
+      return () => set.delete(handler as (p: never) => void)
+    },
   }
-  Reflect.set(globalThis, "window", fake)
-  return fake
+
+  const emit = <E extends BridgeEventName>(payload: Extract<BridgeEvent, { event: E }>) => {
+    for (const handler of handlers.get(payload.event) ?? []) (handler as (p: unknown) => void)(payload)
+  }
+
+  return { bridge, calls, emit }
+}
+
+/** A bridge with no host, as under `vite dev` or in a plain browser. */
+const noHostBridge = (): Bridge => ({
+  available: false,
+  request: () => Promise.reject(new Error("unavailable")),
+  on: () => () => {},
+})
+
+function installFakeWindow() {
+  const opened: string[] = []
+  Reflect.set(globalThis, "window", {
+    addEventListener: () => {},
+    open: (url: string) => {
+      opened.push(url)
+      return null
+    },
+    location: { reload: () => {} },
+  })
+  return opened
 }
 
 beforeEach(() => {
@@ -33,27 +71,15 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, "window")
 })
 
-/** Attaches a host bridge to the fake window. */
-function setHost(bridge: NonNullable<Window["__OPENCODE_ANDROID__"]>) {
-  Reflect.set(Reflect.get(globalThis, "window") as object, "__OPENCODE_ANDROID__", bridge)
-}
-
-/**
- * Reads a capability by name without a type assertion.
- *
- * `Platform` is a union of exact shapes, so indexing it by a dynamic string is
- * not expressible in the type system. `Reflect.get` is the honest way to ask
- * "is this member present?" without casting the object into something it isn't.
- */
-const capability = (name: string): unknown => Reflect.get(createAndroidPlatform(), name)
+const capability = (bridge: Bridge, name: string): unknown => Reflect.get(createAndroidPlatform(bridge), name)
 
 describe("platform identity", () => {
   test("reports the android platform name", () => {
-    expect(createAndroidPlatform().platform).toBe("android")
+    expect(createAndroidPlatform(fakeBridge().bridge).platform).toBe("android")
   })
 
   test("implements the three members Platform requires", () => {
-    const platform = createAndroidPlatform()
+    const platform = createAndroidPlatform(fakeBridge().bridge)
     expect(typeof platform.openExternal).toBe("function")
     expect(typeof platform.restart).toBe("function")
     expect(typeof platform.notify).toBe("function")
@@ -62,37 +88,34 @@ describe("platform identity", () => {
 
 describe("unsupported capabilities are absent, not stubbed", () => {
   test("every declared-unsupported member is undefined", () => {
+    const { bridge } = fakeBridge()
     for (const name of Object.keys(UNSUPPORTED)) {
-      expect(capability(name), `${name} must be absent, not a stub`).toBeUndefined()
+      expect(capability(bridge, name), `${name} must be absent, not a stub`).toBeUndefined()
     }
   })
 
   test("a stub returning undefined would fail this suite", () => {
-    // Guards against a future 'fix' that adds no-op methods to quiet a type
-    // error: upstream checks !!platform.openPath, so a stub would make the UI
-    // believe the action is available and silently do nothing.
-    const platform = createAndroidPlatform()
+    const platform = createAndroidPlatform(fakeBridge().bridge)
     expect(Object.hasOwn(platform, "openPath")).toBe(false)
-    expect(Object.hasOwn(platform, "openDirectoryPickerDialog")).toBe(false)
+    expect(Object.hasOwn(platform, "saveFilePickerDialog")).toBe(false)
   })
 
   test("refuseUnsupported throws a typed, explanatory error", () => {
     expect(() => refuseUnsupported("openPath")).toThrow(UnsupportedOnAndroidError)
     try {
-      refuseUnsupported("storage")
+      refuseUnsupported("saveFilePickerDialog")
       throw new Error("refuseUnsupported did not throw")
     } catch (error) {
       if (!(error instanceof UnsupportedOnAndroidError)) throw error
-      expect(error.capability).toBe("storage")
-      expect(error.message).toContain("M4")
+      expect(error.capability).toBe("saveFilePickerDialog")
+      expect(error.message).toContain("M8")
     }
   })
 
-  test("degraded members exist but are declared", () => {
+  test("degraded members exist and name a milestone", () => {
+    const { bridge } = fakeBridge()
     for (const name of Object.keys(DEGRADED)) {
-      // Present, because Platform requires them...
-      expect(typeof capability(name), `${name} must exist`).toBe("function")
-      // ...and named, so the gap is visible rather than discovered on a device.
+      expect(typeof capability(bridge, name), `${name} must exist`).toBe("function")
       expect(String(Reflect.get(DEGRADED, name))).toMatch(/M\d+/)
     }
   })
@@ -106,7 +129,6 @@ describe("unsupported capabilities are absent, not stubbed", () => {
   test("each unsupported entry explains itself", () => {
     for (const [name, reason] of Object.entries(UNSUPPORTED)) {
       expect(reason.length, `${name} needs a reason`).toBeGreaterThan(0)
-      // Either it never applies, or it names the milestone that delivers it.
       expect(/never|M\d+/.test(reason), `${name}: "${reason}"`).toBe(true)
     }
   })
@@ -114,48 +136,123 @@ describe("unsupported capabilities are absent, not stubbed", () => {
 
 describe("openExternal", () => {
   test("passes http, https and mailto to the host", () => {
-    const seen: string[] = []
-    setHost({ openExternal: (url: string) => seen.push(url) })
-    const platform = createAndroidPlatform()
-
+    const { bridge, calls } = fakeBridge()
+    const platform = createAndroidPlatform(bridge)
     platform.openExternal("https://opencode.ai/")
     platform.openExternal("http://127.0.0.1:4096/")
     platform.openExternal("mailto:someone@example.com")
-
-    expect(seen).toEqual(["https://opencode.ai/", "http://127.0.0.1:4096/", "mailto:someone@example.com"])
+    expect(calls.map((c) => (c.params as { url: string }).url)).toEqual([
+      "https://opencode.ai/",
+      "http://127.0.0.1:4096/",
+      "mailto:someone@example.com",
+    ])
   })
 
   test("refuses schemes that could trigger arbitrary intents", () => {
-    const seen: string[] = []
-    setHost({ openExternal: (url: string) => seen.push(url) })
-    const platform = createAndroidPlatform()
-
+    const { bridge, calls } = fakeBridge()
+    const platform = createAndroidPlatform(bridge)
     platform.openExternal("javascript:alert(1)")
     platform.openExternal("intent://scan/#Intent;scheme=zxing;end")
     platform.openExternal("file:///etc/passwd")
     platform.openExternal("content://com.android.providers/x")
-
-    expect(seen).toEqual([])
+    expect(calls).toEqual([])
   })
 
   test("ignores malformed urls instead of throwing", () => {
-    const seen: string[] = []
-    setHost({ openExternal: (url: string) => seen.push(url) })
-    const platform = createAndroidPlatform()
-
+    const { bridge, calls } = fakeBridge()
+    const platform = createAndroidPlatform(bridge)
     expect(() => platform.openExternal("not a url")).not.toThrow()
-    expect(() => platform.openExternal("")).not.toThrow()
-    expect(seen).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  test("falls back to window.open with no host", () => {
+    const opened = installFakeWindow()
+    createAndroidPlatform(noHostBridge()).openExternal("https://opencode.ai/")
+    expect(opened).toEqual(["https://opencode.ai/"])
   })
 })
 
-describe("version", () => {
-  test("comes from the host when present", () => {
-    setHost({ versionName: "0.2.0-m3" })
-    expect(createAndroidPlatform().version).toBe("0.2.0-m3")
+describe("storage", () => {
+  test("reads and writes through the host, by store name", async () => {
+    const { bridge, calls } = fakeBridge({ "store.get": "stored" })
+    const store = createAndroidPlatform(bridge).storage?.("opencode.global.dat")
+    expect(await store?.getItem("language")).toBe("stored")
+    await store?.setItem("language", "en")
+    expect(calls).toEqual([
+      { method: "store.get", params: { name: "opencode.global.dat", key: "language" } },
+      { method: "store.set", params: { name: "opencode.global.dat", key: "language", value: "en" } },
+    ])
   })
 
-  test("is undefined outside the Android host", () => {
-    expect(createAndroidPlatform().version).toBeUndefined()
+  test("returns the same object for the same store name", () => {
+    const platform = createAndroidPlatform(fakeBridge().bridge)
+    expect(platform.storage?.("a")).toBe(platform.storage?.("a"))
+    expect(platform.storage?.("a")).not.toBe(platform.storage?.("b"))
+  })
+
+  test("length comes from the host key list", async () => {
+    const { bridge } = fakeBridge({ "store.keys": ["one", "two", "three"] })
+    const store = createAndroidPlatform(bridge).storage?.()
+    expect(await store?.getLength()).toBe(3)
+    expect(await store?.key(1)).toBe("two")
+  })
+})
+
+describe("default server", () => {
+  test("reads the persisted selection", async () => {
+    const { bridge } = fakeBridge({ "defaultServer.get": "http://127.0.0.1:4096" })
+    expect(await createAndroidPlatform(bridge).getDefaultServer?.()).toBe("http://127.0.0.1:4096")
+  })
+
+  test("clearing the selection sends null", async () => {
+    const { bridge, calls } = fakeBridge()
+    await createAndroidPlatform(bridge).setDefaultServer?.(null)
+    expect(calls).toEqual([{ method: "defaultServer.set", params: { url: null } }])
+  })
+})
+
+describe("notify", () => {
+  test("posts through the host and routes the tap back", async () => {
+    const { bridge, calls, emit } = fakeBridge({ notify: true })
+    const platform = createAndroidPlatform(bridge)
+
+    let clicked = false
+    await platform.notify("Turn finished", "3 files changed", () => {
+      clicked = true
+    })
+
+    const tag = (calls[0]?.params as { tag: string }).tag
+    expect(tag).toBeTruthy()
+    emit({ event: "notification.clicked", tag })
+    expect(clicked).toBe(true)
+  })
+
+  test("drops the handler when the host could not post", async () => {
+    // A refused POST_NOTIFICATIONS shows nothing, so a tap can never arrive.
+    // Keeping the callback would leak it for the life of the app.
+    const { bridge, calls, emit } = fakeBridge({ notify: false })
+    const platform = createAndroidPlatform(bridge)
+
+    let clicked = false
+    await platform.notify("Ignored", "", () => {
+      clicked = true
+    })
+
+    emit({ event: "notification.clicked", tag: (calls[0]?.params as { tag: string }).tag })
+    expect(clicked).toBe(false)
+  })
+})
+
+describe("directory picker", () => {
+  test("returns the SAF tree uri", async () => {
+    const { bridge } = fakeBridge({ pickDirectory: "content://tree/primary%3AProjects" })
+    expect(await createAndroidPlatform(bridge).openDirectoryPickerDialog?.()).toBe(
+      "content://tree/primary%3AProjects",
+    )
+  })
+
+  test("returns null when the user cancels", async () => {
+    const { bridge } = fakeBridge({ pickDirectory: null })
+    expect(await createAndroidPlatform(bridge).openDirectoryPickerDialog?.()).toBeNull()
   })
 })

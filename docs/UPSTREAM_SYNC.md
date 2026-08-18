@@ -46,13 +46,16 @@ a liability: it must be re-applied and re-verified on every upstream bump.
 |---|---|---|---|---|
 | D1 | `packages/app/src/context/platform.tsx` (~line 20) | Widen `type PlatformName = "web" \| "desktop"` to include `"android"` | M3 | Yes — mechanical union widening |
 | D2 | `packages/app/src/context/platform.tsx` (~line 126) | Add an `{ platform: "android"; … }` arm to the `Platform` union | M3 | Yes |
-| D3 | `packages/app/src/utils/persist.ts` (lines 547, 579) | `platform.platform === "desktop" && !!platform.storage` → `!!platform.storage` | M4 | **Yes — a genuine improvement.** Turns an identity check into a capability check. Worth proposing upstream. |
 | D4 | `README.md` | Keep ours; upstream's is replaced at the vendoring merge | M2 | No — project identity |
 | D5 | `.gitignore` | Upstream's, plus our Android/secrets section | M2 | No — additive, trivial to re-merge |
 
-**Measured divergence budget: 2 upstream source files, 3 edits, plus 2 trivial
-root-file merges.** Measured in M1 by auditing all 28 `platform.platform`
-branch sites across `packages/app`, `packages/session-ui`, and `packages/ui`.
+D1, D2, D3 and D6 are applied; see the next table.
+
+**M1 budgeted 2 upstream source files and 3 edits, plus 2 trivial root-file
+merges. M4 came in at 3 files and 4 edits** — one file over, because the
+one-handed default (D6) was not foreseen in M1. Measured in M1 by auditing all
+28 `platform.platform` branch sites across `packages/app`, `packages/session-ui`,
+and `packages/ui`.
 
 Why D3 matters: without it, Android's native `storage` adapter is silently
 ignored and persistence falls back to WebView `localStorage`, which is losable on
@@ -70,13 +73,21 @@ so **upstream's root `package.json` needs no edit at all**.
 | D1 | `packages/app/src/context/platform.tsx` (line 20) | `type PlatformName = "web" \| "desktop"` → `… \| "android"` | M3 | `git diff` shows +1/−1 |
 | D2 | `packages/app/src/context/platform.tsx` (line 129) | Added `\| { platform: "android"; os?: never }` to the `Platform` union | M3 | `git diff` shows +1 |
 | D4 | `README.md` | Ours kept over upstream's at the merge | M3 | conflict resolved `--ours` |
+| D3 | `packages/app/src/utils/persist.ts` (lines 547, 579) | `platform.platform === "desktop" && !!platform.storage` → `!!platform.storage`, with the six reader occurrences renamed `isDesktop` → `hasNativeStorage` | M4 | `git diff` shows +12/−8 |
 | D5 | `.gitignore` | Upstream's verbatim + our section below a marked line | M3 | 0 upstream files newly ignored |
+| D6 | `packages/app/src/context/settings.tsx` (~line 424) | `mobileTitlebarPosition` default becomes `"bottom"` when `platform.platform === "android"` | M4 | `git diff` shows +3/−1 |
 
-**Actual divergence in upstream source: 1 file, +2/−1 lines.** The M1 estimate was
-1 file / 2 edits, so the measurement held.
+**Actual divergence in upstream source: 3 files, +17/−10 lines** (`platform.tsx` +2/−1, `persist.ts` +12/−8, `settings.tsx` +3/−1).
 
-D3 (`packages/app/src/utils/persist.ts`, identity check → capability check) is
-**not yet applied** — it is only needed once Android supplies `storage`, in M4.
+Two notes on the applied set:
+
+- **D3 is the one worth upstreaming.** It replaces an identity check with a
+  capability check, which is what the surrounding code already meant. Any
+  platform that supplies `storage` should get it used.
+- **D6 is an identity check on purpose**, and is the one place in this project
+  where that is the right answer. There is no capability to test for "is held in
+  one hand". It changes only a *default*; the setting remains the user's, and
+  upstream already ships both positions.
 
 ---
 

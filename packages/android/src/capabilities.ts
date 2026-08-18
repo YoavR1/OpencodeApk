@@ -4,7 +4,7 @@
  * `Platform`'s capability members are optional, and upstream guards each one
  * (`!!platform.openPath`, `platform.platform === "desktop" && ...`). That makes
  * "leave it undefined" the correct way to say *not supported* — a stub that
- * resolves silently would make the UI believe the action succeeded.
+ * resolved silently would make the UI believe the action succeeded.
  *
  * This table exists so the decision is reviewable in one place rather than
  * inferred from which properties happen to be missing, and so a test can assert
@@ -12,7 +12,19 @@
  */
 
 /** Implemented for real on Android. */
-export const SUPPORTED = ["version", "openExternal", "restart", "fetch"] as const
+export const SUPPORTED = [
+  "version",
+  "openExternal",
+  "restart",
+  "fetch",
+  "notify",
+  "storage",
+  "draftStore",
+  "getDefaultServer",
+  "setDefaultServer",
+  "readClipboardImage",
+  "openDirectoryPickerDialog",
+] as const
 
 /**
  * Present because `Platform` requires them, but not yet fully functional.
@@ -20,14 +32,11 @@ export const SUPPORTED = ["version", "openExternal", "restart", "fetch"] as cons
  * This category exists so that a required member which cannot do its job yet is
  * *stated* rather than left as a silent no-op. Anything here must be listed with
  * the milestone that completes it.
+ *
+ * Empty as of M4: `notify` moved to SUPPORTED once it gained a channel, the
+ * POST_NOTIFICATIONS request and a click route through the bridge.
  */
-export const DEGRADED = {
-  notify:
-    "M4 - native notifications need POST_NOTIFICATIONS, a channel and a click " +
-    "route through the bridge. Android WebView exposes no Notification API, so " +
-    "until M4 this call does nothing visible. It is required by the Platform " +
-    "type, so it cannot simply be omitted.",
-} as const
+export const DEGRADED: Readonly<Record<string, string>> = {}
 
 export type DegradedCapability = keyof typeof DEGRADED
 
@@ -58,14 +67,8 @@ export const UNSUPPORTED = {
   windowID: "never - Android is single-window here",
 
   // Real gaps, scheduled.
-  storage: "M4 - needs the native bridge",
-  draftStore: "M4 - needs the native bridge",
-  getDefaultServer: "M4 - needs persisted preferences",
-  setDefaultServer: "M4 - needs persisted preferences",
-  openDirectoryPickerDialog: "M4 - Storage Access Framework",
-  openAttachmentPickerDialog: "M8 - Storage Access Framework",
-  saveFilePickerDialog: "M8 - Storage Access Framework",
-  readClipboardImage: "M4 - measure whether WebView paste already covers it",
+  openAttachmentPickerDialog: "M8 - SAF ACTION_OPEN_DOCUMENT, alongside the file browser",
+  saveFilePickerDialog: "M8 - SAF ACTION_CREATE_DOCUMENT",
   exportDebugLogs: "M9 - needs on-device logging first",
   recordFatalRendererError: "M9 - needs on-device logging first",
 } as const
@@ -82,7 +85,7 @@ export const NOT_FULLY_SUPPORTED = { ...DEGRADED, ...UNSUPPORTED } as const
  * so it is a loud signal that a guard is missing rather than an expected path.
  */
 export class UnsupportedOnAndroidError extends Error {
-  constructor(public readonly capability: UnsupportedCapability) {
+  constructor(readonly capability: UnsupportedCapability) {
     super(`"${capability}" is not available on Android: ${UNSUPPORTED[capability]}`)
     this.name = "UnsupportedOnAndroidError"
   }

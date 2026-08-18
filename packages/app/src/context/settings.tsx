@@ -423,7 +423,9 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
         mobileTitlebarPosition: withFallback(
           () => store.general?.mobileTitlebarPosition,
-          defaultSettings.general.mobileTitlebarPosition,
+          // A phone is held in one hand, so the titlebar starts within reach of
+          // a thumb. Only the default differs; the setting is still the user's.
+          platform.platform === "android" ? "bottom" : defaultSettings.general.mobileTitlebarPosition,
         ),
         setMobileTitlebarPosition(value: "top" | "bottom") {
           setStore("general", "mobileTitlebarPosition", value)

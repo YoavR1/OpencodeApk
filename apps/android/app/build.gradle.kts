@@ -45,8 +45,11 @@ android {
     testOptions {
         unitTests {
             // Lets JVM unit tests touch android.util.Log without an "not mocked"
-            // failure. The logic under test is pure Kotlin regardless.
+            // failure, for the tests that are pure Kotlin.
             isReturnDefaultValues = true
+            // Robolectric needs the packaged android resources to run the tests
+            // that exercise real platform classes.
+            isIncludeAndroidResources = true
         }
     }
 
@@ -118,8 +121,15 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.webkit)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    // For ApplicationProvider in the Robolectric tests. Same artifact the
+    // instrumented tests already use, so it adds no version to track.
+    testImplementation(libs.androidx.test.junit)
 
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.espresso.core)

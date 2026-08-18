@@ -420,6 +420,174 @@ the exact failure mode `.claude/rules/quality.md` Q4 forbids.
 
 ---
 
+## ADR-0013 — The bridge is a `WebMessagePort`, not `addJavascriptInterface`
+
+**Status.** Accepted (M4). Supersedes the three-method host object M3 shipped.
+
+**Context.** M3's bridge was an `addJavascriptInterface` object with three
+fire-and-forget methods. M4 needs return values, binary payloads (clipboard
+images, draft blobs) and host-initiated events (lifecycle, keyboard, back), none
+of which that shape supports.
+
+`addJavascriptInterface` also injects a reflective Java object into *every* frame
+in the WebView. With three void methods that was tolerable. With twenty-one
+methods reaching preferences, the clipboard, the document picker and
+notifications, it is not.
+
+**Decision.** A single `WebMessagePort` pair. The host keeps one end and posts
+the other into the page, scoped to the app origin (`WebOrigin.ORIGIN`), so no
+other origin can receive it. Messages are JSON envelopes:
+
+```
+renderer → host   {"id":1,"method":"store.get","params":{…}}
+host → renderer   {"id":1,"ok":true,"result":…}
+                  {"id":1,"ok":false,"error":{"code":"…","message":"…"}}
+host → renderer   {"event":"lifecycle","state":"resumed"}     (no id)
+```
+
+**Consequences.**
+
+- The page can send strings down a channel; it cannot enumerate or reflect on
+  native objects. What any string *means* is decided entirely by
+  `BridgeHost`'s `when`.
+- Unknown methods are refused **by name**, so a typo surfaces as a rejected
+  promise rather than one that never settles.
+- The method list exists twice — a TypeScript union and a Kotlin `Set<String>` —
+  because neither language can import the other. `packages/android/src/contract.test.ts`
+  reads both files and fails on drift, in both directions.
+- Every port feature is checked once in `BridgePort.connect()`. A WebView missing
+  any of them gets no bridge at all rather than a half-working one.
+- Requests time out after 15s rather than hanging, because a promise that never
+  settles is indistinguishable from a frozen app.
+
+**Rejected alternative.** Keeping `addJavascriptInterface` and adding a callback
+id parameter to each method. It works, but it grows the reflective surface in
+proportion to the capability list, which is the thing worth avoiding.
+
+---
+
+## ADR-0014 — Back is decided by the renderer, with a host-side timeout
+
+**Status.** Accepted (M4). Fixes a real defect introduced in M2.
+
+**Context.** M2's back handler asked `webView.canGoBack()`. That question cannot
+be answered correctly here: the renderer uses a **memory** router precisely so
+that back does not navigate the WebView's document. The WebView's own history is
+therefore always empty, `canGoBack()` is always false, and **back exited the app
+from any screen, at any depth.**
+
+What back should undo — an open dialog, the navigation drawer, the previous
+route — is state that lives in the web app. The Activity cannot see it.
+
+**Decision.** The Activity offers each press to the renderer over the bridge and
+acts on the answer.
+
+- The renderer runs a small dispatcher (`packages/android/src/back.ts`). Handlers
+  are consulted innermost-first: dialog, then drawer, then route.
+- The drawer handler reads upstream's real `layout.mobileSidebar` state, mounted
+  through `AppInterface`'s existing `serverScoped` slot — an upstream extension
+  point, not a fork.
+- Route depth mirrors `createMemoryHistory`'s cursor, tracking **both** `set` and
+  `go`, because the router's own `navigate(-1)` travels through `go`. Counting
+  only pushes would drift, and back would then claim presses that do nothing.
+
+**Consequences and the two obligations they create.**
+
+1. **The user must always be able to leave.** If no answer arrives within
+   `BackCoordinator.TIMEOUT_MS` (400 ms) the app exits anyway. A wedged web app
+   must never be able to trap someone in it. A handler that throws is treated as
+   declining, for the same reason.
+2. **A late answer must not act on the wrong screen.** Each press carries a
+   token; a reply whose token is not the outstanding one is discarded. The
+   "nothing pending" sentinel is explicitly excluded from being a live token,
+   because web content can send `back.handled` unprompted — a unit test caught
+   that exact hole.
+
+**Accepted cost.** Predictive back can no longer preview the app closing: the
+callback must stay enabled to be offered the press at all, so the system cannot
+know in advance that a press will exit. Correct navigation is worth more than
+the preview animation.
+
+**Rejected alternative.** Deciding in Kotlin from a mirror of the UI state pushed
+across the bridge. That puts two copies of the same state in two languages and
+makes every new dismissable surface a two-sided change.
+
+---
+
+## ADR-0015 — Preferences are not encrypted, and credentials will not live in them
+
+**Status.** Accepted (M4).
+
+**Context.** `Platform.storage` and the draft store are backed by named
+`SharedPreferences` files plus content-addressed blobs in `filesDir`. Neither is
+encrypted.
+
+**Decision.** Leave them unencrypted, and keep provider credentials out of them.
+
+**Reasoning.** Everything stored through this path today is UI state, layout
+preferences, prompt drafts and the selected server URL. Encrypting it would buy
+nothing measurable against the threat model (`docs/ARCHITECTURE.md` 2.8) while
+adding a key-management failure mode that can lose a user's drafts.
+
+The risk is not the current contents but the **precedent**: preferences are the
+obvious place to put an API key later, and that would be the mistake. The class
+comment on `PreferenceStore` says so at the point where someone would make it.
+
+**Consequences.**
+
+- Provider credentials get Keystore-backed storage of their own in M10. That is
+  a separate mechanism, not a flag on this one.
+- Store names arrive from web content, so they are sanitised to a safe filename
+  (`[^A-Za-z0-9._-] → _`, prefixed `oc_`). Dots survive on purpose — real store
+  names contain them (`default.dat`) — and it is the loss of separators that
+  makes traversal impossible.
+- Blob ids are validated against `[0-9a-f]{64}` before being joined to a path,
+  because they come back through the bridge from web content.
+
+---
+
+## ADR-0016 — Mobile layout reuses upstream's own responsive path
+
+**Status.** Accepted (M4).
+
+**Context.** M4 asks for a credible phone application rather than a desktop page
+in a WebView. The obvious reading is to build a mobile layout.
+
+**Inspecting the code first changed the answer.** Upstream already has one:
+`createMediaQuery("(max-width: 767px)")` breakpoints, a `layout.mobileSidebar`
+off-canvas drawer with a backdrop, a `mobileTitlebarPosition` setting with a
+bottom option, and a `hover-reveal` utility that already escapes hover-only
+reveals via `@media (hover: none)`. `newLayoutDesignsDefault` is `true`, so that
+path is live.
+
+**Decision.** Use it. Do not write a second mobile layout.
+
+Three things were needed to make it actually apply on Android:
+
+| Need | What was done | Divergence |
+|---|---|---|
+| The breakpoint must fire | `width=device-width` in the Android `index.html` — without it a WebView reports ~980 CSS px and the mobile path never activates | none |
+| One-handed reach | Default `mobileTitlebarPosition` to `"bottom"` on Android | D6, 3 lines |
+| Hover-only controls | `@media (hover: none)` override in `packages/android/src/styles.css` for the sites that open-code the pattern instead of using upstream's `hover-reveal` | none |
+
+**Consequences.**
+
+- The mobile UX improves when upstream's does, with no merge cost.
+- The hover override depends on upstream's Tailwind class names. If a rename
+  silences it, the symptom is a control that stops appearing on touch. That is
+  written down in the stylesheet next to the selectors.
+- **Not verified on a device.** The shared UI cannot be built in this
+  environment (see `docs/CURRENT_STATUS.md`), so these are reasoned from the
+  code, not observed. D6 in particular turns on a layout upstream still gates
+  behind a non-prod channel in its own settings UI. It changes a default only,
+  and the user can flip it in Settings.
+
+**Rejected alternative.** Mobile-specific Android components wrapping the shared
+screens. It would have produced something demonstrable sooner and a permanent
+second layout to maintain, against `.claude/rules/architecture.md` A1.
+
+---
+
 ## Open questions (not yet ADRs)
 
 | # | Question | Decide at |

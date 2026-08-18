@@ -21,3 +21,37 @@ body {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
+
+/*
+ * Controls that upstream reveals on hover.
+ *
+ * A phone has no hover, so `opacity-0 group-hover:opacity-100` leaves those
+ * controls permanently invisible and unreachable - the remove button on a
+ * pasted image attachment, for instance.
+ *
+ * Upstream already treats this as a real problem and solves it the same way:
+ * packages/ui/src/styles/tailwind/utilities.css defines a `hover-reveal`
+ * utility that is `opacity-0` plus exactly this `@media (hover: none)` escape.
+ * A handful of sites open-code the pattern instead of using that utility, and
+ * those are the ones covered here. Rewriting them upstream would work too, but
+ * this keeps the divergence at zero (.claude/rules/architecture.md) and covers
+ * any site added later.
+ *
+ * Deliberately keyed on the absence of hover rather than on being Android: the
+ * capability is what makes the reveal unusable, and the same is true of a
+ * touchscreen laptop. Sites that fade to `opacity-40` rather than 0 are left
+ * alone - dimmed is still visible and still tappable.
+ *
+ * This does depend on upstream's class names. If a rename ever silences it, the
+ * symptom is a control that stops appearing on touch; the fix is to update the
+ * selectors, not to patch components.
+ */
+@media (hover: none) {
+  [class~="opacity-0"][class~="group-hover:opacity-100"] {
+    opacity: 1;
+  }
+
+  [class~="translate-x-2"][class~="group-hover:translate-x-0"] {
+    transform: none;
+  }
+}
