@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git push -u origin:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(sed -n:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(wc:*)",
+      "Bash(file:*)",
+      "Bash(unzip -l:*)",
+      "Bash(node -v)",
+      "Bash(node -e:*)",
+      "Bash(bun -v)",
+      "Bash(bun run lint:*)",
+      "Bash(bun run typecheck:*)",
+      "Bash(bun test --cwd:*)",
+      "Bash(java -version)",
+      "Bash(javac -version)",
+      "Bash(./gradlew:*)",
+      "Bash(scripts/cloud/session-start.sh)",
+      "Bash(scripts/ci/check-opencode.sh:*)",
+      "Bash(scripts/ci/build-android.sh:*)",
+      "Bash(scripts/ci/verify-apk.sh:*)",
+      "Read(//workspace/**)"
+    ],
+    "deny": [
+      "Bash(bun run test)",
+      "Bash(bun run test:*)",
+      "Bash(rm -rf /*)",
+      "Read(./**/*.keystore)",
+      "Read(./**/*.jks)",
+      "Read(./**/local.properties)",
+      "Read(./.env)",
+      "Read(./**/.env.*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/cloud/session-start.sh",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "OPENCODE_APK_PROJECT": "1"
+  }
+}

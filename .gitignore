@@ -1,0 +1,30 @@
+# --- Android ---
+*.apk
+*.aab
+*.keystore
+*.jks
+local.properties
+.gradle/
+build/
+captures/
+.cxx/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- JS / Bun ---
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# --- Editors / OS ---
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Claude Code local overrides ---
+.claude/settings.local.json

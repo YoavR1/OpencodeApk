@@ -1,0 +1,289 @@
+# Android CI for OpencodeApk.
+#
+# This workflow is deliberately SEPARATE from upstream OpenCode's CI. When
+# upstream is integrated (ADR-0002), its workflows come along unmodified and keep
+# running on their own terms. Nothing here replaces or edits them.
+#
+# Phase handling: before milestone M2 there is no Android Gradle project. That is
+# reported as an explicit PHASE STATE in the job summary -- not a fake failure and
+# not a fake success. scripts/ci/build-android.sh exits 3 for that case and the
+# workflow renders it as a neutral, clearly-labelled outcome.
+
+name: android-ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Detect which phase the repository is in, so downstream jobs are honest.
+  # ---------------------------------------------------------------------------
+  detect:
+    name: detect phase
+    runs-on: ubuntu-latest
+    outputs:
+      has_android: ${{ steps.detect.outputs.has_android }}
+      android_dir: ${{ steps.detect.outputs.android_dir }}
+      has_workspace: ${{ steps.detect.outputs.has_workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: detect
+        name: Detect Android project and JS workspace
+        run: |
+          set -euo pipefail
+
+          gradlew="$(find . -maxdepth 3 -name gradlew -not -path './.git/*' | head -1 || true)"
+          if [ -n "$gradlew" ]; then
+            dir="$(dirname "$gradlew")"
+            echo "has_android=true"      >> "$GITHUB_OUTPUT"
+            echo "android_dir=$dir"      >> "$GITHUB_OUTPUT"
+            echo "### Phase: Android project present" >> "$GITHUB_STEP_SUMMARY"
+            echo "Gradle wrapper found at \`$dir\`. Running the real Android build." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "has_android=false"     >> "$GITHUB_OUTPUT"
+            echo "android_dir="          >> "$GITHUB_OUTPUT"
+            {
+              echo "### Phase: pre-M2 — no Android Gradle project yet"
+              echo ""
+              echo "No \`gradlew\` wrapper exists in this repository."
+              echo ""
+              echo "This is the **expected** state before milestone M2 (first Android APK shell)."
+              echo "It is reported as a phase state rather than a failure or a success."
+              echo ""
+              echo "See \`docs/IMPLEMENTATION_PLAN.md\` (M2) and \`docs/CURRENT_STATUS.md\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -f package.json ] || [ -d packages ]; then
+            echo "has_workspace=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "has_workspace=false" >> "$GITHUB_OUTPUT"
+            {
+              echo ""
+              echo "### Phase: upstream OpenCode not integrated yet"
+              echo ""
+              echo "No root \`package.json\` and no \`packages/\` directory."
+              echo "Integration mechanism is decided in M1 (ADR-0002)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Repository hygiene. Always runs; cheap; catches the things most likely to be
+  # broken by an agent editing shell scripts and JSON from a phone-driven session.
+  # ---------------------------------------------------------------------------
+  hygiene:
+    name: repo hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell scripts parse
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            if bash -n "$f"; then echo "ok   $f"; else echo "FAIL $f"; fail=1; fi
+          done < <(find scripts -name '*.sh' -type f | sort)
+          exit "$fail"
+
+      - name: Shell scripts are executable
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            if [ -x "$f" ]; then echo "ok   $f"; else echo "FAIL not executable: $f"; fail=1; fi
+          done < <(find scripts -name '*.sh' -type f | sort)
+          exit "$fail"
+
+      - name: JSON files are valid
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            if node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"; then
+              echo "ok   $f"
+            else
+              echo "FAIL $f"; fail=1
+            fi
+          done < <(find .claude -name '*.json' -type f | sort)
+          exit "$fail"
+
+      - name: Required control files exist
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in \
+            CLAUDE.md \
+            .claude/settings.json \
+            .claude/rules/architecture.md \
+            .claude/rules/android.md \
+            .claude/rules/quality.md \
+            docs/PROJECT_CHARTER.md \
+            docs/ARCHITECTURE.md \
+            docs/IMPLEMENTATION_PLAN.md \
+            docs/CURRENT_STATUS.md \
+            docs/DECISIONS.md \
+            docs/TEST_MATRIX.md \
+            docs/UPSTREAM_SYNC.md \
+            docs/CLAUDE_CLOUD_SETUP.md \
+            docs/PHONE_WORKFLOW.md ; do
+            if [ -f "$f" ]; then echo "ok   $f"; else echo "MISSING $f"; missing=1; fi
+          done
+          exit "$missing"
+
+      - name: No secrets or build output committed
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS= read -r f; do
+            echo "FORBIDDEN committed file: $f"; bad=1
+          done < <(git ls-files | grep -E '\.(apk|aab|keystore|jks)$|(^|/)local\.properties$|(^|/)\.env$' || true)
+          exit "$bad"
+
+  # ---------------------------------------------------------------------------
+  # OpenCode workspace checks. Only meaningful once upstream is integrated.
+  # Never invokes the upstream root "test" script (it intentionally exits 1).
+  # ---------------------------------------------------------------------------
+  opencode-checks:
+    name: opencode workspace checks
+    needs: detect
+    if: needs.detect.outputs.has_workspace == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read declared package manager
+        id: pm
+        run: |
+          set -euo pipefail
+          declared="$(node -e "try{const p=require('./package.json');process.stdout.write(String(p.packageManager||''))}catch(e){}")"
+          echo "Declared package manager: ${declared:-none}"
+          # Strip the "bun@" prefix for setup-bun. Fall back to "latest" only when
+          # nothing is declared -- never to dodge an error with the declared one.
+          case "$declared" in
+            bun@*) version="${declared#bun@}" ;;
+            *)     version="latest" ;;
+          esac
+          echo "bun_version=$version" >> "$GITHUB_OUTPUT"
+          echo "Using Bun version: $version"
+
+      - name: Setup Bun (declared version)
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Use the version upstream declares. Do not float this to "latest" to
+          # dodge an error -- see CLAUDE.md section 6.
+          bun-version: ${{ steps.pm.outputs.bun_version }}
+
+      - name: Run safe workspace checks
+        run: scripts/ci/check-opencode.sh
+
+  # ---------------------------------------------------------------------------
+  # The real Android build. Skipped, with an explicit summary, before M2.
+  # ---------------------------------------------------------------------------
+  android:
+    name: android build
+    needs: detect
+    if: needs.detect.outputs.has_android == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build (lint, unit tests, assembleDebug)
+        run: scripts/ci/build-android.sh
+        env:
+          TASKS: lint test assembleDebug
+
+      - name: Verify APK
+        run: scripts/ci/verify-apk.sh
+
+      - name: Locate debug APK
+        id: apk
+        if: always()
+        run: |
+          set -euo pipefail
+          apk="$(find . -name '*debug*.apk' -path '*outputs*' | head -1 || true)"
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          if [ -n "$apk" ]; then
+            echo "Found debug APK: $apk" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No debug APK produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload debug APK
+        if: steps.apk.outputs.path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            **/build/reports/**
+            **/build/test-results/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Explicit, visible phase state when the Android project does not exist yet.
+  # Succeeds -- but says clearly, in the summary, that nothing was built.
+  # ---------------------------------------------------------------------------
+  android-phase-state:
+    name: android build (pre-M2 phase)
+    needs: detect
+    if: needs.detect.outputs.has_android == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report phase, build nothing
+        run: |
+          set -euo pipefail
+          scripts/ci/build-android.sh || rc=$?
+          rc="${rc:-0}"
+          echo "build-android.sh exit code: $rc (3 = pre-M2 phase state)"
+          if [ "$rc" -ne 3 ] && [ "$rc" -ne 0 ]; then
+            echo "Unexpected exit code from build-android.sh"
+            exit 1
+          fi
+          {
+            echo "## No APK was built"
+            echo ""
+            echo "The Android Gradle project does not exist yet, so **nothing was built"
+            echo "and nothing was tested**. This job is green because the repository is"
+            echo "in a known pre-M2 phase — not because an Android build passed."
+            echo ""
+            echo "Next: milestone **M2**, \`prompts/02_ANDROID_SHELL.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
