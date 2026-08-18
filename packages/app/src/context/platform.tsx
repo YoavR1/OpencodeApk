@@ -17,7 +17,7 @@ type OpenAttachmentPickerOptions = {
   defaultPath?: string
 }
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
-type PlatformName = "web" | "desktop"
+type PlatformName = "web" | "desktop" | "android"
 type DesktopOS = "macos" | "windows" | "linux"
 
 export type FatalRendererErrorLog = {
@@ -126,6 +126,7 @@ type PlatformBase = {
 export type Platform = PlatformBase &
   (
     | { platform: "web"; os?: never }
+    | { platform: "android"; os?: never }
     | {
         platform: "desktop"
         os?: DesktopOS

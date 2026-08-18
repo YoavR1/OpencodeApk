@@ -93,6 +93,21 @@ else
   bad "AndroidManifest.xml missing"
 fi
 
+# --------------------------------------------------------------- web content
+# From M3 the APK must carry the shared OpenCode UI. An APK without it installs
+# and launches to a blank screen, which is the most misleading kind of "success".
+head2 "shared UI assets"
+if printf '%s' "$LISTING" | grep -q 'assets/web/index.html'; then
+  good "assets/web/index.html present"
+  WEB_FILES="$(printf '%s' "$LISTING" | grep -c 'assets/web/' || true)"
+  say "       $WEB_FILES file(s) under assets/web/"
+  if [ "$WEB_FILES" -lt 2 ]; then
+    bad "only $WEB_FILES file under assets/web/ - a real vite build emits JS and CSS too"
+  fi
+else
+  bad "assets/web/index.html MISSING - the APK would launch to a blank screen"
+fi
+
 # ------------------------------------------------------------------ native ABI
 head2 "native ABIs"
 ABIS="$(printf '%s' "$LISTING" | grep -oE 'lib/[a-z0-9_-]+/' | cut -d/ -f2 | sort -u)"

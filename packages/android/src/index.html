@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover: the Activity is edge-to-edge and applies the real
+         window insets itself, so the page must be allowed under the cutout. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5"
+    />
+    <title>OpenCode</title>
+    <script id="oc-theme-preload-script" src="/oc-theme-preload.js"></script>
+  </head>
+  <body class="antialiased overscroll-none text-12-regular overflow-hidden">
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root" class="flex flex-col h-dvh"></div>
+    <script src="./main.tsx" type="module"></script>
+  </body>
+</html>

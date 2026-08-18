@@ -78,6 +78,7 @@ else
 fi
 
 # ------------------------------------------------------------------- lint
+# oxlint over the whole repository. Fast, and it covers our own JS/TS too.
 head2 "lint"
 if node -e "const p=require('./package.json');process.exit(p.scripts&&p.scripts.lint?0:1)" 2>/dev/null; then
   bun run lint || fail "lint failed"
@@ -86,9 +87,28 @@ else
 fi
 
 # --------------------------------------------------------------- typecheck
+#
+# Scoped, by default, to the packages this project actually owns or modifies:
+# @opencode-ai/android (ours) and @opencode-ai/app (divergence D1-D3).
+#
+# This is targeting, not weakening. Typechecking all ~30 upstream packages
+# verifies upstream's code against upstream's own commit -- work upstream's CI
+# already does, and which this project cannot fix if it is red. Our concern is
+# that our changes typecheck against the pinned upstream.
+#
+# Set TYPECHECK_ALL=1 to run the full workspace, e.g. when bumping the pin.
 head2 "typecheck"
 if node -e "const p=require('./package.json');process.exit(p.scripts&&p.scripts.typecheck?0:1)" 2>/dev/null; then
-  bun run typecheck || fail "typecheck failed"
+  if [ "${TYPECHECK_ALL:-0}" = "1" ]; then
+    say "scope: entire workspace (TYPECHECK_ALL=1)"
+    bun run typecheck || fail "typecheck failed"
+  else
+    FILTERS="${TYPECHECK_FILTERS:---filter=@opencode-ai/android --filter=@opencode-ai/app}"
+    say "scope: $FILTERS"
+    say "(set TYPECHECK_ALL=1 for the whole workspace -- see the comment above)"
+    # shellcheck disable=SC2086
+    bun turbo typecheck $FILTERS || fail "typecheck failed"
+  fi
 else
   say "no root 'typecheck' script -- skipped"
 fi

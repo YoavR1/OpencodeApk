@@ -1,0 +1,21 @@
+/*
+ * The shared design system, plus the minimum needed to sit correctly inside an
+ * Android WebView. Anything beyond that belongs in the shared UI, not here.
+ */
+@import "@opencode-ai/app/index.css";
+
+html,
+body {
+  /* The Activity is edge-to-edge and applies real window insets to the WebView,
+     so the page must not add its own or content is inset twice. */
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  /* Touch, not mouse: suppress the tap highlight and the 300ms delay. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}

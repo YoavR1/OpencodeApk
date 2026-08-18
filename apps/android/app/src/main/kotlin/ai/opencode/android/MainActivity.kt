@@ -33,10 +33,19 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.web_view)
-        WebViewHost.configure(webView, applicationContext) {
-            // The renderer died. The Activity rebuilds itself with a fresh WebView.
-            if (!isFinishing && !isDestroyed) recreate()
-        }
+        WebViewHost.configure(
+            webView = webView,
+            context = applicationContext,
+            onRendererGone = {
+                // The renderer died. The Activity rebuilds itself with a fresh WebView.
+                if (!isFinishing && !isDestroyed) recreate()
+            },
+            onRestart = {
+                // Platform.restart() from the shared UI. Must hop to the main
+                // thread: the bridge call arrives on a WebView JS thread.
+                runOnUiThread { if (!isFinishing && !isDestroyed) recreate() }
+            },
+        )
 
         applyInsets()
         registerBackHandling()

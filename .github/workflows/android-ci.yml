@@ -137,7 +137,12 @@ jobs:
             docs/TEST_MATRIX.md \
             docs/UPSTREAM_SYNC.md \
             docs/CLAUDE_CLOUD_SETUP.md \
-            docs/PHONE_WORKFLOW.md ; do
+            docs/PHONE_WORKFLOW.md \
+            scripts/cloud/session-start.sh \
+            scripts/ci/check-opencode.sh \
+            scripts/ci/build-shared-ui.sh \
+            scripts/ci/build-android.sh \
+            scripts/ci/verify-apk.sh ; do
             if [ -f "$f" ]; then echo "ok   $f"; else echo "MISSING $f"; missing=1; fi
           done
           exit "$missing"
@@ -190,6 +195,12 @@ jobs:
       - name: Run safe workspace checks
         run: scripts/ci/check-opencode.sh
 
+      - name: Shared UI builds
+        run: bun run --cwd packages/android build
+
+      - name: Android adapter tests
+        run: bun test --cwd packages/android
+
   # ---------------------------------------------------------------------------
   # The real Android build. Skipped, with an explicit summary, before M2.
   # ---------------------------------------------------------------------------
@@ -211,6 +222,29 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      # From M3 the APK's content is the real shared OpenCode UI, so the Android
+      # build depends on a successful JS build. Gradle's syncSharedUi task fails
+      # loudly if this step did not produce packages/android/dist.
+      - name: Read declared package manager
+        id: pm
+        run: |
+          set -euo pipefail
+          declared="$(node -e "try{process.stdout.write(String(require('./package.json').packageManager||''))}catch(e){}")"
+          case "$declared" in
+            bun@*) version="${declared#bun@}" ;;
+            *)     version="latest" ;;
+          esac
+          echo "bun_version=$version" >> "$GITHUB_OUTPUT"
+          echo "Using Bun $version (declared: ${declared:-none})"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.pm.outputs.bun_version }}
+
+      - name: Build shared OpenCode UI
+        run: scripts/ci/build-shared-ui.sh
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3

@@ -1,0 +1,20 @@
+{
+  "name": "@opencode-ai/android",
+  "private": true,
+  "type": "module",
+  "description": "Android renderer for the shared OpenCode application",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test src --only-failures"
+  },
+  "devDependencies": {
+    "@opencode-ai/app": "workspace:*",
+    "@opencode-ai/ui": "workspace:*",
+    "@solidjs/router": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "solid-js": "catalog:",
+    "vite": "catalog:"
+  }
+}

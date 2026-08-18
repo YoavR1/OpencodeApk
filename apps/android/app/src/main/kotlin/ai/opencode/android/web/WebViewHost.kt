@@ -9,6 +9,8 @@ import android.webkit.WebView
 import android.webkit.WebSettings
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import ai.opencode.android.BuildConfig
 import ai.opencode.android.util.SafeLog
 
@@ -26,7 +28,12 @@ import ai.opencode.android.util.SafeLog
  */
 object WebViewHost {
 
-    fun configure(webView: WebView, context: Context, onRendererGone: () -> Unit) {
+    fun configure(
+        webView: WebView,
+        context: Context,
+        onRendererGone: () -> Unit,
+        onRestart: () -> Unit,
+    ) {
         val loader = WebViewAssetLoader.Builder()
             .setDomain(WebOrigin.DOMAIN)
             .addPathHandler(WebOrigin.ASSET_PATH, WebViewAssetLoader.AssetsPathHandler(context))
@@ -58,8 +65,38 @@ object WebViewHost {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
 
+        installHostBridge(webView, context, onRestart)
+
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     }
+
+    /**
+     * Exposes `window.__OPENCODE_ANDROID__` to the renderer.
+     *
+     * The adapter script must run before the app bundle. `addDocumentStartJavaScript`
+     * guarantees that; where the WebView is too old to support it, injecting on
+     * page start is close enough, because the renderer reads the host lazily and
+     * only at render time. Either way the renderer treats the object as optional,
+     * so a failure here degrades to browser behaviour rather than a broken app.
+     */
+    private fun installHostBridge(webView: WebView, context: Context, onRestart: () -> Unit) {
+        webView.addJavascriptInterface(
+            AndroidHostBridge(context, onRestart),
+            AndroidHostBridge.INTERFACE_NAME,
+        )
+
+        val script = AndroidHostBridge.bootstrapScript()
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, script, setOf(WebOrigin.ORIGIN))
+            SafeLog.d("host bridge installed via document-start script")
+        } else {
+            SafeLog.w("DOCUMENT_START_SCRIPT unsupported; falling back to onPageStarted")
+            pendingBootstrap = script
+        }
+    }
+
+    /** Set only when the document-start API is unavailable. */
+    private var pendingBootstrap: String? = null
 
     // Lint's MissingOnRenderProcessGone check does not resolve the override below
     // on this Kotlin declaration and reports it as missing. The Kotlin compiler
@@ -72,6 +109,11 @@ object WebViewHost {
         private val loader: WebViewAssetLoader,
         private val onRendererGone: () -> Unit,
     ) : WebViewClient() {
+
+        override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            pendingBootstrap?.let { view.evaluateJavascript(it, null) }
+        }
 
         override fun shouldInterceptRequest(
             view: WebView,

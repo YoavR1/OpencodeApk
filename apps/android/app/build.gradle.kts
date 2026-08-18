@@ -57,6 +57,62 @@ android {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared OpenCode UI
+//
+// From M3 the APK's web content is the real upstream SolidJS application, built
+// by `packages/android` with vite. It is build output, not source: the assets
+// directory is generated and git-ignored.
+//
+// The build deliberately FAILS when the bundle is missing rather than producing
+// an APK that installs and shows a blank screen. A blank app that builds is
+// worse than a build that tells you what to run.
+// ---------------------------------------------------------------------------
+
+val sharedUiDist = rootProject.layout.projectDirectory.dir("../../packages/android/dist")
+val webAssetsDir = layout.projectDirectory.dir("src/main/assets/web")
+
+// A Sync task whose source directory does not exist is skipped as NO-SOURCE, and
+// a skipped task's doFirst never runs - which would let the build succeed and
+// ship an APK with no web content at all. The check therefore lives in its own
+// task that declares no outputs, so Gradle always runs it.
+val verifySharedUi by tasks.registering {
+    description = "Fails the build if the shared OpenCode UI has not been built."
+    group = "verification"
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val index = sharedUiDist.file("index.html").asFile
+        check(index.exists()) {
+            """
+            |
+            |The shared OpenCode UI has not been built.
+            |
+            |Expected: ${index.path}
+            |
+            |Build it first, from the repository root:
+            |
+            |    bun install --frozen-lockfile
+            |    bun run --cwd packages/android build
+            |
+            |CI does this in the "Build shared OpenCode UI" step before Gradle runs.
+            |See docs/ARCHITECTURE.md 2.2 and docs/CURRENT_STATUS.md.
+            """.trimMargin()
+        }
+    }
+}
+
+val syncSharedUi by tasks.registering(Sync::class) {
+    description = "Copies the built shared OpenCode UI into the APK assets."
+    group = "build"
+    dependsOn(verifySharedUi)
+
+    from(sharedUiDist)
+    into(webAssetsDir)
+}
+
+tasks.named("preBuild") { dependsOn(syncSharedUi) }
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
