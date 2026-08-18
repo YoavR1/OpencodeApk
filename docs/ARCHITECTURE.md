@@ -389,7 +389,7 @@ Status: **designed and decided; not yet implemented.** Implementation starts at 
 `WebView` served by `androidx.webkit.WebViewAssetLoader`.** Rationale and rejected
 alternatives are in ADR-0009.
 
-## 2.2 Module and package layout — decided
+## 2.2 Module and package layout — **implemented in M3**
 
 ```
 /                                   repo root == upstream workspace root (after M2 vendoring)
@@ -400,14 +400,17 @@ alternatives are in ADR-0009.
 ├── packages/                                            upstream, unmodified except platform.tsx
 │   ├── app/  session-ui/  ui/  client/  sdk/  core/  server/  opencode/  desktop/ …
 │   │
-│   └── android/                          NEW  @opencode-ai/android   (renderer package)
+│   └── android/                          @opencode-ai/android   (renderer package)
 │       ├── package.json                       inside the packages/* glob -> no root edit needed
-│       ├── vite.config.ts                     uses @opencode-ai/app/vite, mirrors desktop
-│       ├── index.html
+│       ├── vite.config.ts                     uses @opencode-ai/app/vite, base "./"
+│       ├── tsconfig.json                      mirrors desktop's, minus electron types
 │       └── src/
-│           ├── index.tsx                      Android renderer entry (mirrors desktop renderer)
+│           ├── index.html                     vite root
+│           ├── main.tsx                       entry; mirrors the desktop renderer
 │           ├── platform.ts                    Android `Platform` implementation
-│           └── bridge.ts                      typed JS half of the native bridge
+│           ├── capabilities.ts                SUPPORTED / DEGRADED / UNSUPPORTED
+│           ├── platform.test.ts               adapter contract tests
+│           └── styles.css                     shared design system + WebView fixes
 │
 └── apps/                                 NEW  (deliberately outside the bun workspace globs)
     └── android/                               Gradle project
@@ -463,12 +466,57 @@ Two deliberate choices:
 └──────────────────────────────────────────────────────────────┘
 ```
 
+## 2.3a Capability honesty — SUPPORTED / DEGRADED / UNSUPPORTED
+
+`packages/android/src/capabilities.ts` declares, in one reviewable place, what
+Android can do. The three categories exist because "the method is missing" and
+"the method exists but does nothing" are different failures and must not be
+conflated.
+
+| Category | Meaning | How it is expressed |
+|---|---|---|
+| **SUPPORTED** | Implemented for real | The method exists and works |
+| **DEGRADED** | Required by the `Platform` type, but not yet functional | The method exists, and the gap is named with the milestone that closes it |
+| **UNSUPPORTED** | Not provided | The member is **left `undefined`** |
+
+Leaving a member `undefined` is the correct way to say *unsupported*, because
+upstream already guards every optional capability (`!!platform.openPath`,
+`platform.platform === "desktop" && …`). A stub that resolved silently would make
+the shared UI believe the action succeeded.
+
+`UnsupportedOnAndroidError` exists for any future call site that must fail loudly
+rather than do nothing. Nothing in the shared UI should reach it; if it is ever
+thrown, an upstream guard is missing.
+
+Tests in `platform.test.ts` assert that every `UNSUPPORTED` member is genuinely
+absent, that every `DEGRADED` member exists and names a milestone, and that no
+capability appears in two categories — so a later "fix" that adds no-op stubs to
+silence a type error fails the suite.
+
+**Current DEGRADED entry: `notify`.** Android WebView exposes no Notification API,
+and native notifications need `POST_NOTIFICATIONS`, a channel, and a click route
+through the bridge — all M4. `Platform` requires `notify`, so it cannot be
+omitted; it is named instead.
+
 ## 2.4 The native bridge — `BridgePort`
 
 The desktop exposes 58 methods on `window.api`. Android needs far fewer, because
-most are desktop-only. The bridge is a single typed request/response channel over
-`WebMessagePort` (preferred over `addJavascriptInterface`, which exposes a
-reflective surface).
+most are desktop-only.
+
+**M3 ships a deliberately minimal first version** (`AndroidHostBridge.kt`): three
+fire-and-forget members — `versionName`, `openExternal`, `restart` — injected as
+`window.__OPENCODE_ANDROID__` via `WebViewCompat.addDocumentStartJavaScript`, so
+it exists before the app bundle runs (with an `onPageStarted` fallback on older
+WebViews). The renderer treats the object as optional, so a failure to install it
+degrades to browser behaviour rather than a broken app.
+
+`addJavascriptInterface` is acceptable at this size — three methods, no return
+values, each validating its own input. **`openExternal` re-checks the URL scheme
+on the Kotlin side** even though the renderer already checks it: the interface is
+reachable from any script in the WebView, so it must not trust its caller.
+
+**M4 replaces this with the typed `WebMessagePort` channel below**, when storage,
+drafts and pickers arrive and the surface stops being trivially small.
 
 ```ts
 // packages/android/src/bridge.ts

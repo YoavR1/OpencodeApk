@@ -21,11 +21,17 @@ warning system for the project's biggest long-term risk: unbounded merge cost.
 | **Commit** | `4e81a0b` |
 | **Subject** | `fix(console): preserve inference sessions (#43124)` |
 | **Audited** | 2026-08-18 (M0) |
-| **Integrated** | ❌ **Not yet.** Read for the M0 and M1 audits. Vendoring merge is the **first task of M2**. |
+| **Integrated** | ✅ **Yes**, merged in M3 (commit `f0745dc`). |
 
-Upstream was cloned to a scratch path for reading in M0 and re-read in depth in
-M1. **No upstream code is present in this repository yet.** ADR-0002 is now
-decided, and the merge happens at the start of M2.
+The merge went exactly as M1 predicted: **two conflicts, both anticipated**
+(`README.md`, `.gitignore`), 6,511 files added, and no upstream-tracked file
+caught by our added ignore patterns.
+
+**One thing M1 did not predict:** the first fetch used `--depth=1`, which made the
+repository shallow and caused the push to be rejected with
+`remote: fatal: did not receive expected object`. Vendoring by merge requires
+full upstream history — `git fetch --unshallow upstream dev`. Recorded here so a
+future bump does not repeat it.
 
 ---
 
@@ -59,7 +65,18 @@ so **upstream's root `package.json` needs no edit at all**.
 
 ### Applied
 
-*None.*
+| # | File | Change | Applied | Verified |
+|---|---|---|---|---|
+| D1 | `packages/app/src/context/platform.tsx` (line 20) | `type PlatformName = "web" \| "desktop"` → `… \| "android"` | M3 | `git diff` shows +1/−1 |
+| D2 | `packages/app/src/context/platform.tsx` (line 129) | Added `\| { platform: "android"; os?: never }` to the `Platform` union | M3 | `git diff` shows +1 |
+| D4 | `README.md` | Ours kept over upstream's at the merge | M3 | conflict resolved `--ours` |
+| D5 | `.gitignore` | Upstream's verbatim + our section below a marked line | M3 | 0 upstream files newly ignored |
+
+**Actual divergence in upstream source: 1 file, +2/−1 lines.** The M1 estimate was
+1 file / 2 edits, so the measurement held.
+
+D3 (`packages/app/src/utils/persist.ts`, identity check → capability check) is
+**not yet applied** — it is only needed once Android supplies `storage`, in M4.
 
 ---
 
