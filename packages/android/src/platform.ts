@@ -24,37 +24,65 @@ declare global {
      */
     __OPENCODE_ANDROID__?: {
       versionName?: string
+
+      // `this: void` is accurate, not a workaround: the bootstrap script in
+      // AndroidHostBridge.kt builds this object from plain closures that never
+      // read `this`, so pulling a member into a local is safe. Declaring it
+      // keeps the unbound-method lint honest instead of suppressed.
+
       /** Hands a URL to the system browser via Intent.ACTION_VIEW. */
-      openExternal?(url: string): void
+      openExternal?(this: void, url: string): void
       /** Restarts the hosting Activity. */
-      restart?(): void
+      restart?(this: void): void
       /** Posts a system notification; `tag` correlates the click callback. */
-      notify?(title: string, body: string, tag: string): void
+      notify?(this: void, title: string, body: string, tag: string): void
     }
   }
 }
 
-const host = () => window.__OPENCODE_ANDROID__
+/**
+ * The browser window, or `undefined` outside one.
+ *
+ * Importing this module must not require a DOM. It is imported by unit tests,
+ * and a module-scope `window` reference would make the whole file unloadable
+ * there - which is exactly how this was caught.
+ */
+const browser = (): Window | undefined => (typeof window === "undefined" ? undefined : window)
+
+const host = () => browser()?.__OPENCODE_ANDROID__
 
 /** URL schemes the app will hand to the system. Matches upstream's web platform. */
 const OPENABLE_SCHEMES = new Set(["http:", "https:", "mailto:"])
 
 const notificationClicks = new Map<string, () => void>()
 
+let clickListenerInstalled = false
+
 /**
- * Dispatched by the host when a notification posted from here is tapped.
- * Registered unconditionally so a notification tapped before this module's
- * consumer is ready still resolves.
+ * Subscribes to notification taps relayed by the host.
+ *
+ * Installed when the platform is created rather than at module scope, so that
+ * importing this file has no side effects and needs no DOM. Idempotent, because
+ * the platform may legitimately be constructed more than once (the Activity is
+ * disposable and can be recreated).
  */
-window.addEventListener("opencode:notification-click", (event) => {
-  const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
-  if (!tag) return
-  const handler = notificationClicks.get(tag)
-  notificationClicks.delete(tag)
-  handler?.()
-})
+function installNotificationClickListener() {
+  if (clickListenerInstalled) return
+  const win = browser()
+  if (!win) return
+  clickListenerInstalled = true
+  win.addEventListener("opencode:notification-click", (event) => {
+    const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
+    if (!tag) return
+    const handler = notificationClicks.get(tag)
+    notificationClicks.delete(tag)
+    handler?.()
+  })
+}
 
 export function createAndroidPlatform(): Platform {
+  installNotificationClickListener()
+
   return {
     platform: "android",
 
@@ -79,7 +107,7 @@ export function createAndroidPlatform(): Platform {
         return
       }
       // vite dev in a browser: behave like upstream's web platform.
-      window.open(parsed.href, "_blank", "noopener,noreferrer")
+      browser()?.open(parsed.href, "_blank", "noopener,noreferrer")
     },
 
     async restart() {
@@ -88,7 +116,7 @@ export function createAndroidPlatform(): Platform {
         native()
         return
       }
-      window.location.reload()
+      browser()?.location.reload()
     },
 
     /**

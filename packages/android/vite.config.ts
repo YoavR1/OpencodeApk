@@ -10,7 +10,7 @@ import appPlugin from "@opencode-ai/app/vite"
  * Android build could drift from the desktop build without anyone noticing.
  */
 export default defineConfig({
-  plugins: [appPlugin as never],
+  plugins: [appPlugin],
 
   root: "src",
   publicDir: "../../app/public",
