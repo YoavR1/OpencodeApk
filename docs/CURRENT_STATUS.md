@@ -12,7 +12,7 @@
 | **Current milestone** | **M4 — code complete, device verification outstanding** |
 | **Next milestone** | **M5 — remote server connection** |
 | **Next prompt** | **`prompts/05_REMOTE_SERVER_MODE.md`** |
-| **CI** | see the run for this branch's latest commit |
+| **CI** | ✅ green — [run 32154997649](https://github.com/YoavR1/OpencodeApk/actions/runs/32154997649) |
 
 ---
 
@@ -113,6 +113,29 @@ now caught by name rather than swept up by `runCatching`.
 
 ## Verification — what actually ran
 
+**CI — VERIFIED GREEN.** Run
+[32154997649](https://github.com/YoavR1/OpencodeApk/actions/runs/32154997649) on
+`b4f9e113b`, all five jobs:
+
+```
+detect phase                                          success
+repo hygiene                                          success
+opencode workspace checks                             success
+  Run safe workspace checks (lint + typecheck)        success
+  Shared UI builds                                    success
+  Android adapter tests                               success
+android build                                         success
+  Build shared OpenCode UI                            success   (53s)
+  Build (lintDebug, testDebugUnitTest, assembleDebug) success   (94s)
+  Verify APK                                          success
+  Upload debug APK                                    success
+android build (pre-M2 phase)                          skipped
+```
+
+| Artifact | Size |
+|---|---|
+| **`opencode-android-debug`** | **15,942,362 bytes** (15,582,286 at M3) |
+
 Locally, against a stand-in bundle shaped like a real vite build:
 
 ```
@@ -121,7 +144,7 @@ Locally, against a stand-in bundle shaped like a real vite build:
   unit tests    60 tests, 0 failures
   APK           app-debug.apk produced
 
-bun test --cwd packages/android                          69 pass, 0 fail
+bun test --cwd packages/android                          72 pass, 0 fail
 ```
 
 The three remaining lint warnings are inherent and deliberate: `targetSdk 36` vs
@@ -131,7 +154,22 @@ and `setJavaScriptEnabled` — which is the entire premise of a WebView shell.
 | Layer | M3 | M4 |
 |---|---|---|
 | Kotlin unit tests | 15 | **60** |
-| Renderer tests | 12 | **69** |
+| Renderer tests | 12 | **72** |
+
+### Two CI failures, both mine
+
+The first push failed the typecheck: `platform.ts` imported
+`@solid-primitives/storage`, which `packages/app` depends on and
+`packages/android` does not. It now reads the type back off the boundary
+(`ReturnType<NonNullable<Platform["storage"]>>`), which needs no new dependency
+and no lockfile change. The second was the same TS7006 class: the derived type
+is a union, and TypeScript does not reliably infer function parameters through a
+union contextual type, so those parameters are now annotated.
+
+Neither was visible locally, and the reason is worth recording: `node_modules`
+cannot be installed here, so *every* import in the workspace is unresolvable and
+a real missing dependency looks exactly like the ambient noise. The local
+typecheck carries no signal at all — CI is the only authority for it.
 
 ---
 

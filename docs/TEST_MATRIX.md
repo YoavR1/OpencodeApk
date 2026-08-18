@@ -13,7 +13,7 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 |---|---|
 | Android JVM unit tests | ✅ **60 tests**, run in CI by `testDebugUnitTest` |
 | Android instrumented tests | ⚠️ 4 written, **not run** — no emulator job yet |
-| Renderer tests | ✅ **69 tests** across 5 files, run in CI by `bun test --cwd packages/android` |
+| Renderer tests | ✅ **72 tests** across 5 files, run in CI by `bun test --cwd packages/android` |
 | Cross-language contract | ✅ TS ↔ Kotlin method lists compared mechanically |
 | Shared UI build | ✅ upstream vendored; `build-shared-ui.sh` gates the APK |
 | Integration tests | ⬜ |
@@ -121,6 +121,8 @@ Run per-package. **Never** via the root `test` script.
 | Capabilities | **every `UNSUPPORTED` member is `undefined`**, not a stub | M3 | ✅ |
 | Capabilities | `openPath` / `openDirectoryPickerDialog` are absent, not present-and-undefined | M3 | ✅ |
 | Capabilities | `DEGRADED` members exist and each names a milestone | M3 | ✅ |
+| Capabilities | **every `SUPPORTED` capability is actually present** | M4 | ✅ |
+| Capabilities | `draftStore` is the store the composition root injected | M4 | ✅ |
 | Capabilities | no capability appears in two categories | M3 | ✅ |
 | Capabilities | `refuseUnsupported` throws a typed, explanatory error | M3 | ✅ |
 | Capabilities | every `UNSUPPORTED` reason is `never` or a milestone | M3 | ✅ |
