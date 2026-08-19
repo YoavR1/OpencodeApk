@@ -275,10 +275,42 @@ describe("notify", () => {
 })
 
 describe("directory picker", () => {
-  test("returns the SAF tree uri", async () => {
-    const { bridge } = fakeBridge({ pickDirectory: "content://tree/primary%3AProjects" })
+  test("returns a real path, not the SAF uri", async () => {
+    // Changed deliberately in M8. The picker returns a content:// URI, and the
+    // on-device runtime is a Node process that cannot open one - so the host
+    // imports the folder into a project and hands back its path (ADR-0024).
+    const { bridge } = fakeBridge({
+      pickDirectory: {
+        slug: "projects",
+        name: "Projects",
+        path: "/data/user/0/ai.opencode.android/files/projects/projects",
+        files: 12,
+        skippedLarge: [],
+        skippedDirectories: [],
+        complete: true,
+      },
+    })
+    const path = await createAndroidPlatform(bridge).openDirectoryPickerDialog?.()
+    expect(path).toBe("/data/user/0/ai.opencode.android/files/projects/projects")
+    expect(String(path).startsWith("content://")).toBe(false)
+  })
+
+  test("an incomplete import still yields a usable project", async () => {
+    // The agent should get a working directory even when some files were too
+    // large to copy; the shortfall is reported rather than made fatal.
+    const { bridge } = fakeBridge({
+      pickDirectory: {
+        slug: "big",
+        name: "Big",
+        path: "/data/user/0/ai.opencode.android/files/projects/big",
+        files: 3,
+        skippedLarge: ["video.mp4"],
+        skippedDirectories: ["node_modules"],
+        complete: false,
+      },
+    })
     expect(await createAndroidPlatform(bridge).openDirectoryPickerDialog?.()).toBe(
-      "content://tree/primary%3AProjects",
+      "/data/user/0/ai.opencode.android/files/projects/big",
     )
   })
 

@@ -34,18 +34,32 @@ class DirectoryPicker(activity: AppCompatActivity) {
         }
 
     /** Returns the picked tree URI as a string, or null when the user cancelled. */
-    suspend fun pick(): String? = suspendCoroutine { continuation ->
+    suspend fun pick(): String? = pickTree()?.first?.toString()
+
+    /**
+     * Returns the picked tree and a name to suggest for it, or null on cancel.
+     *
+     * The name is the last path segment of the tree's document id - what the user
+     * would call the folder - so an imported project is not called "project".
+     */
+    suspend fun pickTree(): Pair<Uri, String>? = suspendCoroutine { continuation ->
         if (pending != null) {
             // A second picker while one is open would strand the first callback.
             continuation.resume(null)
             return@suspendCoroutine
         }
-        pending = { uri -> continuation.resume(uri?.toString()) }
+        pending = { uri -> continuation.resume(uri?.let { it to suggestedName(it) }) }
         runCatching { launcher.launch(null) }.onFailure {
             SafeLog.w("could not open the directory picker", it)
             pending = null
             continuation.resume(null)
         }
+    }
+
+    private fun suggestedName(uri: Uri): String {
+        val id = runCatching { android.provider.DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+        val tail = id?.substringAfterLast('/')?.substringAfterLast(':')?.trim()
+        return tail?.takeIf { it.isNotEmpty() } ?: "project"
     }
 
     /**

@@ -104,10 +104,61 @@ class EmbeddedProcessRuntime(
 
             // Android's shell, not the one this Node build was compiled against.
             put("SHELL", ANDROID_SHELL)
+
+            // Bundled tools - git above all - are reachable by name through a
+            // directory of symlinks into nativeLibraryDir. Android's own bin
+            // directories stay on PATH so the shell and its coreutils still work.
+            val tools = RuntimeTools(File(binary.parent), home).install()
+            val path = listOfNotNull(tools?.absolutePath, "/system/bin", "/system/xbin")
+            put("PATH", path.joinToString(":"))
+            if (tools != null) {
+                // git resolves its helpers relative to this, which is why
+                // git-remote-https has to be linked rather than renamed.
+                put("GIT_EXEC_PATH", tools.absolutePath)
+                // Android has no /etc/gitconfig and no passwd entry to read a
+                // name from; without these git refuses to commit at all.
+                // This build has Termux's prefix compiled in for its system
+                // config and attributes files. Those paths are unreadable here,
+                // and without both of these every git command warns about it.
+                // Same class of problem as OpenSSL's config path in M6.
+                put("GIT_CONFIG_NOSYSTEM", "1")
+                put("GIT_ATTR_NOSYSTEM", "1")
+                seedGitIdentity(state)
+            }
         }
 
         SafeLog.d("starting runtime from ${binary.name}")
         return builder.start()
+    }
+
+    /**
+     * Gives git an identity, once, if the user has not set one.
+     *
+     * Git refuses to commit without a name and an email, and Android has no
+     * passwd entry to guess from - so without this every commit fails with a
+     * message telling the user to run `git config`, which is not something they
+     * can act on from a phone.
+     *
+     * Written only when absent, so anything set later stands.
+     */
+    private fun seedGitIdentity(home: File) {
+        val config = File(home, ".gitconfig")
+        if (config.exists()) return
+        runCatching {
+            config.parentFile?.mkdirs()
+            config.writeText(
+                buildString {
+                    appendLine("# Written by OpenCode for Android because git requires an identity.")
+                    appendLine("# Change these freely; this file is only created when it is missing.")
+                    appendLine("[user]")
+                    appendLine("\tname = OpenCode")
+                    appendLine("\temail = opencode@localhost")
+                    appendLine("[init]")
+                    appendLine("\tdefaultBranch = main")
+                },
+            )
+            SafeLog.d("seeded a default git identity")
+        }.onFailure { SafeLog.w("could not seed the git identity", it) }
     }
 
     /**

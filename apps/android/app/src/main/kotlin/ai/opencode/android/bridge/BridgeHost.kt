@@ -7,6 +7,8 @@ import ai.opencode.android.platform.DraftStore
 import ai.opencode.android.platform.Notifications
 import ai.opencode.android.platform.PreferenceStore
 import ai.opencode.android.platform.SystemIntegration
+import ai.opencode.android.project.ProjectImport
+import ai.opencode.android.project.ProjectStore
 import ai.opencode.android.runtime.RuntimeController
 import ai.opencode.android.util.SafeLog
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +43,9 @@ class BridgeHost(
     private val system = SystemIntegration(activity.applicationContext)
     private val notifications = Notifications(activity.applicationContext)
     private val picker = DirectoryPicker(activity)
+    private val projects = ProjectStore(
+        java.io.File(activity.applicationContext.filesDir, "projects").apply { mkdirs() },
+    )
 
     fun handle(raw: String) {
         val request = BridgeRequest.parse(raw)
@@ -153,7 +158,63 @@ class BridgeHost(
                     val url = request.str("url") ?: return invalid(id, "url")
                     send(BridgeContract.success(id, system.openExternal(url)))
                 }
-                "pickDirectory" -> send(BridgeContract.success(id, picker.pick()))
+                "pickDirectory" -> {
+                    // Returns a real POSIX path, not the content:// URI the
+                    // picker hands back. The runtime is a Node process and cannot
+                    // open a SAF URI, so the chosen folder is copied into a
+                    // project first and the project's path is what the UI gets.
+                    // See ADR-0024.
+                    val tree = picker.pickTree()
+                    if (tree == null) {
+                        send(BridgeContract.success(id, null))
+                    } else {
+                        withIo(id) {
+                            val project = projects.create(tree.second)
+                            val result = ProjectImport(activity.applicationContext).copyInto(tree.first, project.directory)
+                            send(
+                                BridgeContract.success(
+                                    id,
+                                    JSONObject()
+                                        .put("path", project.path)
+                                        .put("name", project.name)
+                                        .put("files", result.files)
+                                        .put("skippedLarge", JSONArray(result.skippedLarge))
+                                        .put("skippedDirectories", JSONArray(result.skippedDirectories))
+                                        .put("complete", result.complete),
+                                ),
+                            )
+                        }
+                    }
+                }
+                "project.list" -> withIo(id) {
+                    val array = JSONArray()
+                    for (project in projects.list()) {
+                        array.put(
+                            JSONObject()
+                                .put("slug", project.slug)
+                                .put("name", project.name)
+                                .put("path", project.path),
+                        )
+                    }
+                    send(BridgeContract.success(id, array))
+                }
+                "project.create" -> withIo(id) {
+                    val name = request.str("name") ?: return@withIo invalid(id, "name")
+                    val project = projects.create(name)
+                    send(
+                        BridgeContract.success(
+                            id,
+                            JSONObject()
+                                .put("slug", project.slug)
+                                .put("name", project.name)
+                                .put("path", project.path),
+                        ),
+                    )
+                }
+                "project.delete" -> withIo(id) {
+                    val slug = request.str("slug") ?: return@withIo invalid(id, "slug")
+                    send(BridgeContract.success(id, projects.delete(slug)))
+                }
                 "notify" -> {
                     val title = request.str("title") ?: return invalid(id, "title")
                     val body = request.str("body") ?: ""

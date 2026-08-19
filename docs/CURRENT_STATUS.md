@@ -7,15 +7,60 @@
 | | |
 |---|---|
 | **Last updated** | 2026-08-19 |
-| **Session** | M7 local runtime integration |
+| **Session** | M8 projects, terminal, files and Git |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M7 — the app starts its own server. No PC, no external server.** |
-| **Next milestone** | **M8 — files, terminal, Git** |
-| **Next prompt** | **`prompts/08_TERMINAL_FILES_GIT.md`** |
+| **Current milestone** | **M8 — projects and Git work on the device; terminals deferred with evidence** |
+| **Next milestone** | **M9 — lifecycle and resilience** |
+| **Next prompt** | **`prompts/09_ANDROID_LIFECYCLE.md`** |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
 > needs no external server. This is not project completion.
+
+---
+
+## M8: real projects, and Git
+
+**Git runs on the phone.** Bundled the same way as Node, verified end to end in a
+real project on the device:
+
+```
+git init -b main; git add README.md; git commit -m "first commit"
+--- status ---   ## main
+--- log ---      757658b first commit
+--- diff ---     README.md | 1 +
+--- branch ---   * main
+```
+
+**21 instrumented tests pass**, including the whole local workflow above.
+
+**The central constraint, and what it forced.** SAF returns `content://` URIs and
+Node cannot open one — so a folder picked through SAF is *unusable* as a working
+directory, not merely awkward. Projects are therefore app-private directories with
+real POSIX paths, and SAF is used to move files in and out (**ADR-0024**).
+`openDirectoryPickerDialog` now returns a **path**, not a URI, which is a
+deliberate change to what M4 shipped.
+
+That is also the answer to permissions: **nothing broad is requested**. The user
+grants one tree, at the moment they import it.
+
+**Two measurements shrank this milestone, as in M6:**
+
+- The bash tool uses `ChildProcess`, **not a PTY** — so shell commands work today.
+  `node-pty` is needed only by the interactive terminal panel.
+- 146 of git's 181 helpers are hardlinks to one binary. Shipping `git` plus
+  `git-remote-http` costs ~8 MB and covers every builtin.
+
+**Terminals are deferred, with a reason** (ADR-0025): `node-pty` has no Android
+build and cross-compiling it needs the NDK plus headers for a Node this project
+does not yet build itself. It belongs with ADR-0022's open item — compiling Node —
+since they share the toolchain. The shim throws if a terminal is opened rather
+than failing silently.
+
+**Import is bounded and honest.** 20,000 files, 512 MB, 32 MB per file, with
+`node_modules`/`.git`/`build` skipped. What was skipped is reported: an agent
+reasoning about a tree that is quietly missing files is worse than one told the
+tree is incomplete.
 
 ---
 
@@ -230,10 +275,10 @@ meant four defects away from functioning. That distinction is already in
 
 ## Recommended next session
 
-**M8 — `prompts/08_TERMINAL_FILES_GIT.md`.** The one native gap left is PTY:
-`@lydell/node-pty` has no Android arm64 build, and the bundle imports it
-statically, so a shim satisfies the import and throws if a terminal is opened.
-Building it with the NDK is M8's first job.
+**M9 — `prompts/09_ANDROID_LIFECYCLE.md`.** The runtime is still owned by the
+Activity, so Android may kill it the moment the app is backgrounded — which means
+a long agent turn is not protected. That is the largest remaining gap between this
+and something usable day to day, and it is what M9 exists for.
 
 *(Superseded plan for M7, kept for context: this is where the*
 runtime gets packaged into the APK as `lib*.so`, started from a foreground

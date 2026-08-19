@@ -35,7 +35,16 @@ export type BridgeRequest =
   | { method: "clipboard.readImage"; params?: never }
   | { method: "share"; params: { text: string; title?: string } }
   | { method: "openExternal"; params: { url: string } }
+  /**
+   * Opens the system folder picker, copies the chosen folder into a project, and
+   * resolves to the project's **real path** - not the `content://` URI the picker
+   * returns, which the Node runtime cannot open. See ADR-0024.
+   */
   | { method: "pickDirectory"; params: { title?: string } }
+  // --- projects ---------------------------------------------------------------
+  | { method: "project.list"; params?: never }
+  | { method: "project.create"; params: { name: string } }
+  | { method: "project.delete"; params: { slug: string } }
   | { method: "notify"; params: { title: string; body: string; tag: string } }
   | { method: "restart"; params?: never }
   // --- the on-device runtime --------------------------------------------------
@@ -61,6 +70,18 @@ export type BridgeMethod = BridgeRequest["method"]
 
 /** The states the on-device runtime reports. Mirrors RuntimeState in Kotlin. */
 export type RuntimeStateName = "stopped" | "starting" | "ready" | "degraded" | "failed" | "stopping"
+
+/** A project on the device. `path` is a real POSIX path the runtime can work in. */
+export type AndroidProject = { slug: string; name: string; path: string }
+
+/** What `pickDirectory` resolves to once the chosen folder has been imported. */
+export type ImportedProject = AndroidProject & {
+  files: number
+  skippedLarge: string[]
+  skippedDirectories: string[]
+  /** False when the import hit a size limit or skipped a file; see ADR-0024. */
+  complete: boolean
+}
 
 /** What `runtime.await` resolves to. The same shape upstream calls ServerReadyData. */
 export type RuntimeHandle = { url: string; username?: string; password?: string }

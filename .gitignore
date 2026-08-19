@@ -70,3 +70,6 @@ apps/android/app/src/debug/jniLibs/
 # M7: on-device runtime, prepared by scripts/runtime/prepare-android-runtime.py
 apps/android/app/src/main/jniLibs/
 apps/android/app/src/main/assets/runtime/
+
+# M8 spike: git staging (scripts/runtime/termux.py)
+spike/m8/staging/

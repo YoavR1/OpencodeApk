@@ -16,7 +16,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **working on hardware; LAN-over-HTTP impossible (ADR-0021)** |
 | M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | **complete — the server runs on the phone** |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | **the app starts its own server on device** |
-| M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | not started |
+| M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | **projects and Git on device; terminals deferred (ADR-0025)** |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | not started |
 | M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | not started |
 | M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | not started |

@@ -835,6 +835,45 @@ answering health checks and `failed` when it never started or has exited.
 `degraded` is deliberately distinct from `failed`: one is recoverable and the
 other is not, and the UI should not show one message for both.
 
+### Projects, and why they are app-private (M8)
+
+The Storage Access Framework returns `content://` URIs. The runtime is a Node
+process and **cannot open one**, so a folder picked through SAF is unusable as a
+working directory — not awkward, unusable. Projects are therefore real
+directories the app owns:
+
+```
+filesDir/projects/<slug>/          the working copy, a real POSIX path
+        └── .opencode-name         the display name, kept out of the path
+filesDir/runtime/bin/              symlinks: node, git, git-remote-https
+filesDir/opencode/                 HOME for the runtime; .gitconfig lives here
+```
+
+SAF moves files *in and out*; it is never the workspace (ADR-0024). That is also
+why no broad storage permission is requested: the user grants one tree, when they
+import it.
+
+`platform.openDirectoryPickerDialog` returns a **path**, not a URI — a deliberate
+change to what M4 shipped, so upstream's "add project" flow receives something the
+runtime can `chdir` into.
+
+### Tools on the device
+
+| Tool | Shipped as | Reached as |
+|---|---|---|
+| Node | `libnode.so` | `nativeLibraryDir/libnode.so`, run directly |
+| git | `libgit.so` | `filesDir/runtime/bin/git` → symlink |
+| git-remote-https | `libgit-remote-http.so` | `filesDir/runtime/bin/git-remote-https` → symlink |
+
+Android extracts only `lib*.so`, and git looks for helpers by exact name. A
+symlink into `nativeLibraryDir` bridges the two, and executing through one is
+permitted because the kernel checks the target. `PATH` and `GIT_EXEC_PATH` point
+at that directory.
+
+**Shell commands need no PTY.** The bash tool uses `ChildProcess`, measured rather
+than assumed, so it works today. `node-pty` is needed only by the interactive
+terminal panel and is deferred (ADR-0025).
+
 ### Reachability — the constraint that shapes both modes
 
 The app is served from `https://appassets.androidplatform.net`, which makes it a

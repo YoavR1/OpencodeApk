@@ -12,8 +12,8 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 | Layer | Status |
 |---|---|
 | Android JVM unit tests | ✅ **82 tests**, run in CI by `testDebugUnitTest` |
-| Android instrumented tests | ✅ **17 tests, RUN AND PASSING on a OnePlus 15** (M5–M7) — locally, not in CI |
-| Renderer tests | ✅ **97 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
+| Android instrumented tests | ✅ **21 tests, RUN AND PASSING on a OnePlus 15** (M5–M8) — locally, not in CI |
+| Renderer tests | ✅ **98 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
 | Device verification | ✅ **the app runs, connects and streams** — see `docs/CURRENT_STATUS.md` |
 | Cross-language contract | ✅ TS ↔ Kotlin bridge method lists compared mechanically |
 | Upstream divergence guard | ✅ **new in M5** — every entry in `UPSTREAM_SYNC.md` fails a test if a merge drops it |
@@ -93,6 +93,15 @@ Fast, no device. Run by `./gradlew test`.
 | Runtime | Each launch gets its own password; the handle is loopback | M7 | ✅ |
 | Runtime | The config binds loopback and allows the WebView origin | M7 | ✅ |
 | Runtime | State names are stable, distinct, and never carry the password | M7 | ✅ |
+| Projects | Names become readable slugs; overlong ones truncate | M8 | ✅ |
+| Projects | **No slug can contain a separator or traverse** | M8 | ✅ |
+| Projects | **A traversing name still resolves inside the store** | M8 | ✅ |
+| Projects | A name that slugifies to nothing still gets a directory | M8 | ✅ |
+| Projects | Unicode names produce a usable slug and keep the display name | M8 | ✅ |
+| Projects | Create, find, list, delete; delete of a missing project is not an error | M8 | ✅ |
+| Projects | Two projects may share a display name, not a directory | M8 | ✅ |
+| Projects | **Projects survive a new store over the same directory** | M8 | ✅ |
+| Projects | A stray file at the store root is not a project | M8 | ✅ |
 | Crypto | Value round-trips; empty, unicode and 200 KB values | M5 | ✅ |
 | Crypto | **The stored form does not contain the plaintext** | M5 | ✅ |
 | Crypto | A fresh IV per operation, so equal values differ on disk | M5 | ✅ |
@@ -131,6 +140,10 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Runtime | **An unauthenticated request to the local server is refused (401)** | M7 | ✅ **passed on device** |
 | Runtime | The server is on loopback, and gone after stop | M7 | ✅ **passed on device** |
 | Runtime | Starting twice reuses the same server | M7 | ✅ **passed on device** |
+| Git | The bundled binary runs (`git --version`) | M8 | ✅ **passed on device** |
+| Git | **init, add, commit, status, log, diff, branch** in a real project | M8 | ✅ **passed on device** |
+| Git | Remote plumbing works and `git-remote-https` is linked | M8 | ✅ **passed on device** |
+| Projects | The project path is real and inside the sandbox | M8 | ✅ **passed on device** |
 | App launch | Activity starts without crashing | M2 | ✅ **passed on device** |
 | App identity | `packageName` is `ai.opencode.android` | M2 | ✅ **passed on device** |
 | WebView | Security settings locked down (file access off both forms) | M2 | ✅ **passed on device** |
@@ -178,6 +191,8 @@ Run per-package. **Never** via the root `test` script.
 | `openExternal` | **refuses `javascript:`, `intent:`, `file:`, `content:`** | M3 | ✅ |
 | `openExternal` | ignores malformed URLs without throwing | M3 | ✅ |
 | `version` | from the host, `undefined` outside it | M3 | ✅ |
+| Picker | **Returns a real path, not a SAF uri** (ADR-0024) | M8 | ✅ |
+| Picker | An incomplete import still yields a usable project | M8 | ✅ |
 | Bridge | Request/response round-trip over a real `MessageChannel` | M4 | ✅ |
 | Bridge | Errors reject with a typed `BridgeError` | M4 | ✅ |
 | Bridge | Events dispatch to subscribers; unsubscribe works | M4 | ✅ |

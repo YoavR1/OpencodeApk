@@ -976,6 +976,93 @@ on the device: an unauthenticated request gets **401**.
 
 ---
 
+## ADR-0024 — Projects are app-private directories; SAF moves files, it is not the workspace
+
+**Status.** Accepted (M8).
+
+**The constraint.** The Storage Access Framework hands back `content://` URIs.
+The OpenCode server is a Node process, and **Node cannot open one**. A folder the
+user picks through SAF is therefore unusable as a working directory: not
+inconvenient, unusable. Anything the runtime works in has to be a real POSIX path.
+
+**Decision.** Projects live in app-private storage - `filesDir/projects/<slug>` -
+and SAF is used for *movement*: importing an existing folder in, and later
+exporting changes back out. The working copy is always a real directory.
+
+`platform.openDirectoryPickerDialog` therefore returns a **path**, not a URI: the
+host opens the picker, copies the tree into a project, and hands back the
+project's path. Upstream's "add project" flow gets what it expects and nothing
+downstream has to know Android was involved.
+
+**This is also the answer to the permissions question.** No
+`MANAGE_EXTERNAL_STORAGE`, no `READ_EXTERNAL_STORAGE`, nothing broad at all - the
+user grants access to one tree, at the moment they import it. `.claude/rules/android.md`
+N4 asked for a written justification before requesting a broad permission; none is
+requested, so none is needed.
+
+**Consequences.**
+
+- **Import is a copy, not a mount.** Edits happen to the app's copy. Getting them
+  back out is an explicit export, which is a real limitation and a deliberate one:
+  the alternative is a permission this project has said it will not ask for.
+- **Import is bounded** - 20,000 files, 512 MB total, 32 MB per file, and
+  `node_modules`/`.git`/`build` and similar are skipped outright. A phone is not a
+  workstation, and an accidental import of a photo library should stop rather than
+  grind. What was skipped is **reported**, never silently dropped: an agent
+  reasoning about a tree that is quietly missing files is worse than one told the
+  tree is incomplete.
+- **Display names are separate from directory names.** The name the user typed is
+  kept in `.opencode-name`; the directory is a slug. Names come from people and
+  from imported folders, so slugging is a boundary - a name containing separators
+  or `..` must not be able to place a project outside the store, which is tested
+  directly and end to end.
+
+---
+
+## ADR-0025 — Git is bundled; terminals are not
+
+**Status.** Accepted (M8). Git verified on a device.
+
+**Git.** OpenCode shells out to a real `git` binary
+(`ChildProcess.make("git", …)` throughout `packages/core/src/git.ts`), so Git
+support means shipping one. It is bundled exactly as Node is: `lib*.so` in
+jniLibs, versioned libraries renamed and references patched, run from
+`nativeLibraryDir`.
+
+Only **two** of git's 181 helpers ship. 146 of them are hardlinks to the same
+`git` binary, which already contains every builtin - status, diff, branch, commit,
+add, log - and the rest are perl and shell scripts for workflows a phone will not
+run. `git-remote-http` is the one real addition, and it is also `git-remote-https`.
+Git costs about 8 MB on top of Node.
+
+**Helpers are reached through symlinks.** Android extracts only `lib*.so`, and git
+looks for `git-remote-https` by that exact name. The app creates a directory of
+symlinks in app-private storage pointing back into `nativeLibraryDir`, and puts it
+on `PATH` and `GIT_EXEC_PATH`. Executing through such a symlink is permitted - the
+kernel checks the target, which lives in an exec-permitted directory - and that was
+verified on a device before anything was built on it.
+
+**Two more compiled-in prefixes had to be overridden**, the same class of problem
+as OpenSSL's config in M6: `GIT_CONFIG_NOSYSTEM` and `GIT_ATTR_NOSYSTEM`, because
+this build looks for both under Termux's prefix and warns on every command
+otherwise. And git refuses to commit without an identity, which Android has no
+passwd entry to supply - so a default `~/.gitconfig` is written **once, only when
+absent**, so anything the user sets later stands.
+
+**Terminals are not bundled, and shell commands do not need them.** The bash tool
+uses `ChildProcess`, not a PTY - measured, not assumed - so running shell commands
+works today. `@lydell/node-pty` is needed only by the interactive terminal panel,
+has no Android arm64 build, and building it requires the NDK plus Node headers for
+this exact version. The PTY shim satisfies the bundle's static import and throws
+if a terminal is actually opened, which is honest rather than silent.
+
+**Deferred rather than attempted** because the cost is a cross-compiled native
+module tied to a Node version this project does not yet build itself. It should be
+revisited alongside ADR-0022's open item - compiling Node with the NDK - since the
+two share the whole toolchain.
+
+---
+
 ## Open questions (not yet ADRs)
 
 | # | Question | Decide at |

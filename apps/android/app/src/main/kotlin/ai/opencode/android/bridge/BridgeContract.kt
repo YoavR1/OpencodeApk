@@ -21,6 +21,7 @@ object BridgeContract {
         "share", "openExternal", "pickDirectory", "notify", "restart",
         "back.handled",
         "runtime.await", "runtime.stop",
+        "project.list", "project.create", "project.delete",
         "host.info", "defaultServer.get", "defaultServer.set",
     )
 

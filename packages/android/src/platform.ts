@@ -1,5 +1,5 @@
 import type { DraftStore, Platform } from "@opencode-ai/app"
-import type { Bridge } from "./bridge"
+import type { Bridge, ImportedProject } from "./bridge"
 import { DEGRADED, SUPPORTED, UNSUPPORTED, type UnsupportedCapability, UnsupportedOnAndroidError } from "./capabilities"
 
 /**
@@ -175,12 +175,32 @@ export function createAndroidPlatform(bridge: Bridge, draftStore?: DraftStore): 
      * `content://` tree URIs rather than filesystem paths. The app holds no
      * storage permission (.claude/rules/android.md N4).
      */
+    /**
+     * Picks a folder and returns a path the runtime can actually work in.
+     *
+     * The host copies the chosen folder into an app-private project first,
+     * because the picker returns a `content://` URI and the on-device server is
+     * a Node process that cannot open one (ADR-0024). What comes back is a real
+     * POSIX path, which is what upstream's "add project" flow expects.
+     */
     async openDirectoryPickerDialog() {
       if (!bridge.available) return null
-      const uri = await bridge
-        .request<string | null>({ method: "pickDirectory", params: {} })
+      const imported = await bridge
+        .request<ImportedProject | null>({ method: "pickDirectory", params: {} })
         .catch(() => null)
-      return uri ?? null
+      if (!imported) return null
+
+      if (imported.complete === false) {
+        // Saying nothing would be worse than saying it imperfectly: the agent
+        // would be reasoning about a tree that is quietly missing files.
+        const large = imported.skippedLarge?.length ?? 0
+        const generated = imported.skippedDirectories?.length ?? 0
+        console.warn(
+          `[opencode] imported ${imported.files} file(s) into ${imported.name}; ` +
+            `skipped ${large} large file(s) and ${generated} generated director(ies)`,
+        )
+      }
+      return imported.path
     },
 
     fetch: (input, init) => (input instanceof Request ? fetch(input) : fetch(input, init)),
