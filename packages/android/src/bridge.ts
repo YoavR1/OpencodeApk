@@ -93,6 +93,12 @@ const REQUEST_TIMEOUT_MS = 15_000
 export interface Bridge {
   request<T>(request: BridgeRequest): Promise<T>
   on<E extends BridgeEventName>(event: E, handler: (payload: Extract<BridgeEvent, { event: E }>) => void): () => void
+  /**
+   * Binds a replacement port from the host, failing anything still in flight on
+   * the old one. See the implementation for why in-flight calls are rejected
+   * rather than left to time out.
+   */
+  attach(port: MessagePort): void
   readonly available: boolean
 }
 
@@ -102,41 +108,63 @@ export interface Bridge {
  * Returns an unavailable bridge when there is no host - `vite dev` in a desktop
  * browser, or a unit test - so callers can fall back rather than crash.
  */
-export function createBridge(port?: MessagePort): Bridge {
+export function createBridge(initial?: MessagePort): Bridge {
   const pending = new Map<number, Pending>()
   const listeners = new Map<string, Set<(payload: never) => void>>()
   let nextId = 1
+  let port: MessagePort | undefined
 
-  const available = !!port
-
-  if (port) {
-    port.onmessage = (message: MessageEvent) => {
-      let envelope: Envelope
-      try {
-        envelope = typeof message.data === "string" ? JSON.parse(message.data) : (message.data as Envelope)
-      } catch {
-        return
-      }
-      if (!envelope || typeof envelope !== "object") return
-
-      if ("event" in envelope && envelope.event) {
-        const handlers = listeners.get(envelope.event)
-        if (handlers) for (const handler of handlers) (handler as (p: Envelope) => void)(envelope)
-        return
-      }
-
-      if (typeof envelope.id !== "number") return
-      const waiting = pending.get(envelope.id)
-      if (!waiting) return
-      pending.delete(envelope.id)
-      if (envelope.ok) waiting.resolve(envelope.result)
-      else waiting.reject(new BridgeError(envelope.error?.code ?? "Unknown", envelope.error?.message ?? "bridge error"))
+  const receive = (message: MessageEvent) => {
+    let envelope: Envelope
+    try {
+      envelope = typeof message.data === "string" ? JSON.parse(message.data) : (message.data as Envelope)
+    } catch {
+      return
     }
+    if (!envelope || typeof envelope !== "object") return
+
+    if ("event" in envelope && envelope.event) {
+      const handlers = listeners.get(envelope.event)
+      if (handlers) for (const handler of handlers) (handler as (p: Envelope) => void)(envelope)
+      return
+    }
+
+    if (typeof envelope.id !== "number") return
+    const waiting = pending.get(envelope.id)
+    if (!waiting) return
+    pending.delete(envelope.id)
+    if (envelope.ok) waiting.resolve(envelope.result)
+    else waiting.reject(new BridgeError(envelope.error?.code ?? "Unknown", envelope.error?.message ?? "bridge error"))
+  }
+
+  /**
+   * Binds a port, replacing any previous one.
+   *
+   * The host hands over a fresh channel whenever it has to rebuild one. Anything
+   * still in flight went out on the old port and can never be answered now, so
+   * it is failed immediately rather than left to time out - fifteen seconds of
+   * apparent hang is indistinguishable from a frozen app, and the caller can
+   * retry a rejection.
+   */
+  const attach = (next: MessagePort) => {
+    for (const [, waiting] of pending) {
+      waiting.reject(new BridgeError("Reconnected", "the host replaced the bridge before this call was answered"))
+    }
+    pending.clear()
+
+    if (port) port.onmessage = null
+    port = next
+    port.onmessage = receive
     port.start?.()
   }
 
+  if (initial) attach(initial)
+
   return {
-    available,
+    get available() {
+      return !!port
+    },
+    attach,
 
     request<T>(request: BridgeRequest): Promise<T> {
       if (!port) return Promise.reject(new BridgeError("Unavailable", "no Android host bridge in this environment"))

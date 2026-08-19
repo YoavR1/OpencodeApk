@@ -70,6 +70,10 @@ class MainActivity : AppCompatActivity() {
             webView = webView,
             context = applicationContext,
             onRendererGone = { if (!isFinishing && !isDestroyed) recreate() },
+            onPageStarted = {
+                // The channel belongs to the document being replaced.
+                bridgePort.invalidate()
+            },
             onPageFinished = {
                 // The port is delivered to a live document, so it can only be
                 // connected once the page exists.

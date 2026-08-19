@@ -12,13 +12,23 @@ import { fileURLToPath } from "node:url"
  * This test reads both files and compares them.
  */
 
+/**
+ * Newline normalisation.
+ *
+ * This repository is edited from both Linux and Windows. A working tree
+ * checked out with CRLF would otherwise fail these file-reading tests locally
+ * while passing in CI - the worst split there is, because the local run is the
+ * one a person looks at first.
+ */
+const CRLF = String.fromCharCode(13, 10)
+const LF = String.fromCharCode(10)
 const here = fileURLToPath(new URL(".", import.meta.url))
 const KOTLIN = `${here}../../../apps/android/app/src/main/kotlin/ai/opencode/android/bridge/BridgeContract.kt`
 const TYPESCRIPT = `${here}bridge.ts`
 
 /** The method names in Kotlin's `BridgeContract.METHODS`. */
 function kotlinMethods(): string[] {
-  const source = readFileSync(KOTLIN, "utf8")
+  const source = readFileSync(KOTLIN, "utf8").split(CRLF).join(LF)
   const block = source.match(/val METHODS: Set<String> = setOf\(([\s\S]*?)\n {4}\)/)
   if (!block) throw new Error(`could not find METHODS in ${KOTLIN}`)
   return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
@@ -26,7 +36,7 @@ function kotlinMethods(): string[] {
 
 /** The `method:` literals in the TypeScript `BridgeRequest` union. */
 function typescriptMethods(): string[] {
-  const source = readFileSync(TYPESCRIPT, "utf8")
+  const source = readFileSync(TYPESCRIPT, "utf8").split(CRLF).join(LF)
   const block = source.match(/export type BridgeRequest =([\s\S]*?)\n\n/)
   if (!block) throw new Error(`could not find BridgeRequest in ${TYPESCRIPT}`)
   return [...block[1].matchAll(/\{ method: "([^"]+)"/g)].map((m) => m[1])

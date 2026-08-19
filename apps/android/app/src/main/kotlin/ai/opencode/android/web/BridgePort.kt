@@ -1,5 +1,6 @@
 package ai.opencode.android.web
 
+import android.os.Looper
 import android.webkit.WebView
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebMessagePortCompat
@@ -47,6 +48,17 @@ class BridgePort(
             return
         }
 
+        // Idempotent for a given document. onPageFinished fires more than once
+        // on a cold start, and reconnecting would close the channel the page is
+        // already using: the renderer has stopped listening for handshakes by
+        // then, so it keeps posting into a port whose host end has just been
+        // closed and simply never hears back. That is precisely what M5 shipped,
+        // and it only appeared on a device - a reload happened to fire
+        // onPageFinished once and looked perfectly healthy.
+        //
+        // A genuinely new document calls invalidate() first, via onPageStarted.
+        if (connected) return
+
         disconnect()
 
         val (host, page) = runCatching { WebViewCompat.createWebMessageChannel(webView) }
@@ -80,11 +92,37 @@ class BridgePort(
         }
     }
 
+    /**
+     * Sends a reply or event to the page.
+     *
+     * Safe to call from any thread. WebView APIs - `WebMessagePort` included -
+     * must run on the thread that created the WebView, and bridge handlers
+     * deliberately do disk work on `Dispatchers.IO` and reply from there. Doing
+     * the hop here means no handler has to remember, which is the kind of thing
+     * that is remembered right up until the one place it is not.
+     *
+     * Getting this wrong is silent: the post throws, the renderer never receives
+     * its answer, and the promise it is waiting on simply times out fifteen
+     * seconds later with nothing to say why. That is exactly what M5 shipped,
+     * and only a device showed it.
+     */
     fun send(payload: String) {
+        if (Looper.myLooper() == Looper.getMainLooper()) post(payload) else webView.post { post(payload) }
+    }
+
+    private fun post(payload: String) {
         val port = hostPort ?: return
         runCatching { port.postMessage(WebMessageCompat(payload)) }
             .onFailure { SafeLog.w("could not post a bridge message", it) }
     }
+
+    /**
+     * Drops the channel because the document it belonged to is going away.
+     *
+     * Called when a new page starts loading: the page's end of the channel dies
+     * with its document, so the next [connect] must build a fresh one.
+     */
+    fun invalidate() = disconnect()
 
     fun disconnect() {
         hostPort?.let { runCatching { it.close() } }

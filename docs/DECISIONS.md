@@ -648,7 +648,19 @@ more thing to re-apply on every upstream bump.
 
 ## ADR-0018 — Cleartext HTTP is permitted in debug builds only
 
-**Status.** Accepted (M5).
+**Status.** Accepted (M5), but **its stated purpose was wrong** — corrected on a
+device the same milestone. See ADR-0021.
+
+The decision itself stands: debug builds permit cleartext, release does not, and
+no TLS handling is weakened. What was wrong is the reason given for it. This was
+introduced so a self-hosted LAN server could be reached over plain HTTP, and it
+does not achieve that: the app's page is served from an `https://` origin, and
+Chromium blocks plaintext requests from a secure context as **mixed content**
+before any socket is opened. Android's network security config never gets a say.
+
+The config still matters for loopback, which is what M7 uses, and the release
+policy is still worth pinning. But it does not enable a LAN server, and this ADR
+claimed it did.
 
 **Context.** From M5 the app talks to an OpenCode server the user runs
 themselves, typically on a laptop on the same LAN at something like
@@ -726,6 +738,100 @@ accepted.
 `http://localhost` has no port, so it does not match the allowlist's
 `http://localhost:` prefix, and moving off an `https://` origin would cost the
 secure-context APIs the shared UI relies on.
+
+---
+
+## ADR-0020 — The app has a first-run server setup screen
+
+**Status.** Accepted (M5). Found by running on a device.
+
+**Context.** The shared UI **cannot render without a server**.
+`LayoutProvider`'s `init` reads `serverSdk().scope`, and with an empty server
+list there is no server context to read: the app throws
+`TypeError: Cannot read properties of undefined (reading 'scope')` before it
+draws anything.
+
+Upstream never meets this. Web is served *by* the server it talks to and passes
+`servers={[server]}`; desktop always has a sidecar. **Android in remote mode is
+the first case with genuinely no server until the user provides one**, and M5's
+first attempt — a non-empty sentinel key with an empty server list — opened
+`ServerProvider`'s gate only to crash immediately behind it.
+
+**Decision.** `packages/android/src/setup.tsx` stands in front of `AppInterface`
+until a server is configured, and `AppInterface` is rendered only once there is
+one.
+
+It is deliberately the smallest thing that can produce a working connection:
+address, optional username, optional password. Upstream's own dialog manages
+everything from the second server onwards, and this is not a place to grow a
+second one. Desktop does the same thing with `DesktopFirstLaunchOnboarding`, so
+the shape is upstream's own.
+
+**Consequences.**
+
+- The entry is **probed before it is saved** (`GET /global/health`), so a wrong
+  address is reported while it can still be corrected rather than becoming a
+  server that can never be reached. A 401 is reported as a credentials problem
+  specifically, because that is the failure a user can actually act on.
+- The scheme is checked separately and first, because a mixed-content block and
+  an unreachable host are indistinguishable from `fetch` — both are an opaque
+  `TypeError` — and the advice for them is completely different (ADR-0021).
+- The probe is a reachability check at setup time, not a data path. Everything
+  after it goes through upstream's `ServerConnection` and client factories, so
+  `.claude/rules/architecture.md` A3 still holds.
+
+---
+
+## ADR-0021 — Remote servers must be HTTPS or loopback
+
+**Status.** Accepted (M5). **Discovered on a device**; supersedes the reasoning
+in ADR-0018.
+
+**What happened.** With a real OpenCode server running on the LAN and the phone
+able to reach it — `adb shell curl http://192.168.1.156:4096/global/health`
+returned 200 — the app reported "Could not reach". The WebView console said why:
+
+```
+Mixed Content: The page at 'https://appassets.androidplatform.net/index.html'
+was loaded over HTTPS, but requested an insecure resource
+'http://192.168.1.156:4096/api/health'. This request has been blocked
+```
+
+**The constraint.** The app serves its UI from an `https://` origin (ADR-0008,
+chosen so fonts, storage and fetch behave). A secure context may not issue
+plaintext requests. This is a browser rule enforced before any network call, so
+**no Android configuration affects it** — which is precisely what ADR-0018 got
+wrong.
+
+`http://127.0.0.1` and `http://localhost` are exempt: the specification treats
+them as *potentially trustworthy* origins.
+
+**Therefore:**
+
+| Server | Works? |
+|---|---|
+| `https://…` (any host) | ✅ |
+| `http://127.0.0.1:<port>` — **the M7 on-device server** | ✅ |
+| `http://<LAN address>` | ❌ blocked, unfixably, from this origin |
+
+**Consequences.**
+
+- **M7 is unaffected.** The project's actual goal — a server on the device at
+  `http://127.0.0.1:<port>` — sits in the exempt case. This finding is good news
+  for the end state and bad news only for the M5 checkpoint.
+- **M5's remote mode requires https, or a tunnel** that makes the server appear
+  on the phone's loopback. The verification in this milestone used
+  `adb reverse tcp:4096 tcp:4096`, which is exactly the M7 topology and is why
+  the whole path could be exercised at all.
+- `isReachableFromSecureContext` refuses a plain-http non-loopback address at
+  the point of entry, with an explanation, rather than letting the user save a
+  server that can never work.
+- **Rejected: serving the UI from `http://`.** It would drop the secure context
+  the shared UI relies on and contradicts ADR-0008 and `.claude/rules/android.md` N6.
+- **Deferred: a native `platform.fetch`.** Routing requests through Kotlin would
+  bypass both mixed content and CORS and make any stock server reachable. It is
+  the escape hatch if remote-over-LAN turns out to matter, and it is a large
+  mechanism (streaming bodies across the bridge) that the end goal does not need.
 
 ---
 

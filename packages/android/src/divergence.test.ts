@@ -13,8 +13,26 @@ import { fileURLToPath } from "node:url"
  * So each one gets a test whose failure message says what breaks.
  */
 
+/**
+ * Newline normalisation.
+ *
+ * This repository is edited from both Linux and Windows. A working tree
+ * checked out with CRLF would otherwise fail these file-reading tests locally
+ * while passing in CI - the worst split there is, because the local run is the
+ * one a person looks at first.
+ */
+const CRLF = String.fromCharCode(13, 10)
+const LF = String.fromCharCode(10)
 const here = fileURLToPath(new URL(".", import.meta.url))
-const read = (path: string) => readFileSync(`${here}../../${path}`, "utf8")
+/**
+ * Reads an upstream file with newlines normalised.
+ *
+ * This repository is edited from both Linux and Windows, and a working tree
+ * checked out with CRLF would otherwise fail these tests locally while passing
+ * in CI - the worst possible split, because the local run is the one a person
+ * looks at first.
+ */
+const read = (path: string) => readFileSync(`${here}../../${path}`, "utf8").split(CRLF).join(LF)
 
 describe("D1/D2 - the Platform union knows about Android", () => {
   const source = () => read("app/src/context/platform.tsx")

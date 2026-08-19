@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { hasNoServerSelected, NO_SERVER_SELECTED, startupServerKey } from "./server"
+import {
+  hasNoServerSelected,
+  isReachableFromSecureContext,
+  normalizeServerUrl,
+  NO_SERVER_SELECTED,
+  startupServerKey,
+} from "./server"
 
 describe("startup server key", () => {
   test("the key is never empty", () => {
@@ -41,5 +47,60 @@ describe("startup server key", () => {
     expect(hasNoServerSelected(startupServerKey(null))).toBe(true)
     expect(hasNoServerSelected(startupServerKey("http://host:4096"))).toBe(false)
     expect(hasNoServerSelected("sidecar")).toBe(false)
+  })
+})
+
+describe("normalizeServerUrl", () => {
+  test("bare host:port gets a scheme", () => {
+    expect(normalizeServerUrl("192.168.1.10:4096")).toBe("http://192.168.1.10:4096")
+  })
+
+  test("an explicit scheme is kept", () => {
+    expect(normalizeServerUrl("https://opencode.example:8443")).toBe("https://opencode.example:8443")
+  })
+
+  test("trailing slashes are dropped so one server has one spelling", () => {
+    expect(normalizeServerUrl("http://host:4096/")).toBe("http://host:4096")
+    expect(normalizeServerUrl("http://host:4096///")).toBe("http://host:4096")
+  })
+
+  test("surrounding whitespace is ignored", () => {
+    expect(normalizeServerUrl("  host:4096  ")).toBe("http://host:4096")
+  })
+
+  test("a path is preserved, for a server behind a prefix", () => {
+    expect(normalizeServerUrl("http://host/opencode")).toBe("http://host/opencode")
+  })
+
+  test("unusable input is refused rather than guessed at", () => {
+    for (const bad of ["", "   ", "http://", "://nope", "http:// space"]) {
+      expect(normalizeServerUrl(bad)).toBeUndefined()
+    }
+  })
+})
+
+describe("isReachableFromSecureContext", () => {
+  test("https is always reachable", () => {
+    expect(isReachableFromSecureContext("https://opencode.example")).toBe(true)
+    expect(isReachableFromSecureContext("https://192.168.1.10:4096")).toBe(true)
+  })
+
+  test("loopback over http is reachable", () => {
+    // Potentially trustworthy by specification, which is why the on-device
+    // server in M7 works while a LAN server over http cannot.
+    expect(isReachableFromSecureContext("http://127.0.0.1:4096")).toBe(true)
+    expect(isReachableFromSecureContext("http://localhost:4096")).toBe(true)
+  })
+
+  test("a LAN address over http is NOT reachable", () => {
+    // Verified on a device: Chromium blocks it as mixed content before any
+    // request is made, and no Android network setting changes that.
+    expect(isReachableFromSecureContext("http://192.168.1.156:4096")).toBe(false)
+    expect(isReachableFromSecureContext("http://10.0.0.5:4096")).toBe(false)
+    expect(isReachableFromSecureContext("http://my-laptop.local:4096")).toBe(false)
+  })
+
+  test("nonsense is not reachable", () => {
+    expect(isReachableFromSecureContext("not a url")).toBe(false)
   })
 })

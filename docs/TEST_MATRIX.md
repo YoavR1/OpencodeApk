@@ -12,15 +12,24 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 | Layer | Status |
 |---|---|
 | Android JVM unit tests | ✅ **82 tests**, run in CI by `testDebugUnitTest` |
-| Android instrumented tests | ⚠️ 9 written, **not run** — no emulator job yet |
-| Renderer tests | ✅ **87 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
+| Android instrumented tests | ✅ **9 tests, RUN AND PASSING on a OnePlus 15** (M5) — locally, not in CI |
+| Renderer tests | ✅ **97 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
+| Device verification | ✅ **the app runs, connects and streams** — see `docs/CURRENT_STATUS.md` |
 | Cross-language contract | ✅ TS ↔ Kotlin bridge method lists compared mechanically |
 | Upstream divergence guard | ✅ **new in M5** — every entry in `UPSTREAM_SYNC.md` fails a test if a merge drops it |
 | Shared UI build | ✅ upstream vendored; `build-shared-ui.sh` gates the APK |
 | Integration tests | ⬜ |
 | Manual device verification | ⬜ awaiting a device report |
 
-**What no test here covers: the UI itself, and the network.** Every renderer test
+**M5 update: a device closed most of this gap.** The app was run on a OnePlus 15
+against a live server, and four defects were found that every test here had
+passed. The unit suites were not wrong, they were aimed at the wrong layer:
+threading between the WebView and its host, `onPageFinished` firing twice, an
+empty server list, and a browser security rule are none of them reachable from a
+JVM or a bun test. Where a regression test was possible it was added; where it
+was not, the finding is recorded in `docs/DECISIONS.md`.
+
+**What no test here still covers: the UI itself, and the network.** Every renderer test
 in this file exercises adapter, protocol or configuration logic. Nothing renders
 a component and nothing makes a request, because the shared UI cannot be built in
 this environment (`bun install` is blocked by the proxy — see
@@ -103,23 +112,23 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 
 | Area | Test | Milestone | Status |
 |---|---|---|---|
-| Keystore | The key is really in `AndroidKeyStore` | M5 | ⚠️ written, no emulator job |
-| Keystore | **The key material cannot be exported** | M5 | ⚠️ written, no emulator job |
-| Keystore | A value survives a new cipher instance; another alias cannot read it | M5 | ⚠️ written, no emulator job |
-| App launch | Activity starts without crashing | M2 | ⚠️ written, no emulator job |
-| App identity | `packageName` is `ai.opencode.android` | M2 | ⚠️ written, no emulator job |
-| WebView | Security settings locked down (file access off both forms) | M2 | ⚠️ written, no emulator job |
-| WebView | Placeholder loads from the **https** asset origin, not `file://` | M2 | ⚠️ written, no emulator job |
-| Shared UI | Upstream UI mounts and renders | M3 | ⬜ |
+| Keystore | The key is really in `AndroidKeyStore` | M5 | ✅ **passed on device** |
+| Keystore | **The key material cannot be exported** | M5 | ✅ **passed on device** |
+| Keystore | A value survives a new cipher instance; another alias cannot read it | M5 | ✅ **passed on device** |
+| App launch | Activity starts without crashing | M2 | ✅ **passed on device** |
+| App identity | `packageName` is `ai.opencode.android` | M2 | ✅ **passed on device** |
+| WebView | Security settings locked down (file access off both forms) | M2 | ✅ **passed on device** |
+| WebView | Loads from the **https** asset origin, not `file://` | M2 | ✅ **passed on device** |
+| Shared UI | Upstream UI mounts and renders | M3 | ✅ **verified on device** (M5) |
 | Platform adapter | `notify` produces a real notification | M4 | ⬜ |
 | Platform adapter | `openExternal` fires the right `Intent` | M4 | ⬜ |
 | Navigation | Android back button behaves correctly | M4 | ⬜ policy unit-tested; end-to-end needs a device |
-| Input | Soft keyboard insets do not occlude input | M4 | ⬜ |
-| Layout | Mobile breakpoint activates at a phone viewport | M4 | ⬜ **the main unverified M4 claim** |
+| Input | Soft keyboard insets do not occlude input | M4 | ✅ **verified on device** (M5) |
+| Layout | Mobile breakpoint activates at a phone viewport | M4 | ✅ **verified on device** (M5) |
 | Layout | Hover-revealed controls are visible on touch | M4 | ⬜ |
-| Remote server | Session listing against a real server | M5 | ⬜ **device + server only** |
+| Remote server | Session listing against a real server | M5 | ✅ **verified on device** — `/api/session` 200 |
 | Remote server | Session creation, prompt send, streamed reply | M5 | ⬜ **device + server only** |
-| Remote server | SSE over `fetch` survives WebView (**Q9**) | M5 | ⬜ **the main open question** |
+| Remote server | SSE over `fetch` survives WebView (**Q9**) | M5 | ✅ **ANSWERED: yes** — open `text/event-stream` observed |
 | Remote server | Wrong credentials, unreachable host, offline, mid-turn drop | M5 | ⬜ |
 | Remote server | Reconnect after the server returns | M5 | ⬜ |
 | Local server | Server starts and answers a health check | M7 | ⬜ |
@@ -173,6 +182,9 @@ Run per-package. **Never** via the root `test` script.
 | Focus | Focused field is scrolled with `block: "nearest"` | M4 | ✅ |
 | Focus | An element that cannot scroll does not throw | M4 | ✅ |
 | Startup server | **The key is never empty** — an empty one gates off the whole app | M5 | ✅ |
+| Server entry | `normalizeServerUrl`: bare host gets a scheme, trailing slashes dropped, junk refused | M5 | ✅ |
+| Server entry | **A LAN http address is refused as unreachable from a secure context** | M5 | ✅ |
+| Server entry | https and loopback http are accepted (ADR-0021) | M5 | ✅ |
 | Startup server | A stored key is used; blank/missing falls back to the sentinel | M5 | ✅ |
 | Startup server | The sentinel cannot be mistaken for a real server key | M5 | ✅ |
 | Divergence | **D1/D2** — the `Platform` union still knows about Android | M5 | ✅ |

@@ -11,9 +11,9 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M0 | Baseline / bootstrap | `prompts/00_BOOTSTRAP.md` | **complete** |
 | M1 | Architecture audit | `prompts/01_ARCHITECTURE_AUDIT.md` | **complete** |
 | M2 | First Android APK shell | `prompts/02_ANDROID_SHELL.md` | **complete** — CI builds and verifies the APK |
-| M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | **bundle shipped; rendering was blocked by the server gate until M5** |
-| M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **code complete; device verification outstanding** |
-| M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **code complete; device criteria open** |
+| M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | **complete — UI verified rendering on a device in M5** |
+| M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **complete — mobile layout, IME and notifications verified on a device in M5** |
+| M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **working on hardware; LAN-over-HTTP impossible (ADR-0021)** |
 | M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | not started |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | not started |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | not started |
@@ -204,12 +204,18 @@ before attempting the on-device runtime.
 
 **Exit criteria**
 - [ ] A real agent turn completes end to end against a remote server.
-      *Not verified — no device and no server in the build environment.*
-- [ ] Streaming/event updates arrive in the UI (evidence). *Open; this is **Q9**.*
-- [ ] Connection failures produce clear, non-crashing UI states.
-      *Upstream's `ConnectionGate` handles them by construction, but that is
-      reading, not running.*
+      *Everything up to the model call is verified on a OnePlus 15. The turn
+      itself needs a provider credential and was not run.*
+- [x] Streaming/event updates arrive in the UI (evidence). **Q9 answered:** an
+      open `text/event-stream` to `/global/event` was observed in the WebView.
+- [x] Connection failures produce clear, non-crashing UI states — observed
+      against an unreachable server, and at server entry (ADR-0021).
 - [x] `CURRENT_STATUS.md` records this as a **checkpoint, not the goal**.
+
+**Found on hardware** (all fixed): the bridge replied off the WebView thread;
+`onPageFinished` fires twice and `connect()` destroyed its own channel; the shared
+UI cannot render with zero servers; and a plain-http LAN server is blocked by
+mixed content regardless of Android configuration (ADR-0021).
 
 **Found while doing M5** (all fixed): the server gate never opened, so M3/M4
 rendered nothing; `INTERNET` was never declared; and the server's CORS allowlist

@@ -32,6 +32,7 @@ object WebViewHost {
         webView: WebView,
         context: Context,
         onRendererGone: () -> Unit,
+        onPageStarted: () -> Unit,
         onPageFinished: () -> Unit,
     ) {
         val loader = WebViewAssetLoader.Builder()
@@ -39,7 +40,7 @@ object WebViewHost {
             .addPathHandler(WebOrigin.ASSET_PATH, WebAssetsHandler(context))
             .build()
 
-        webView.webViewClient = AssetClient(loader, onRendererGone, onPageFinished)
+        webView.webViewClient = AssetClient(loader, onRendererGone, onPageStarted, onPageFinished)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -100,8 +101,16 @@ object WebViewHost {
     private class AssetClient(
         private val loader: WebViewAssetLoader,
         private val onRendererGone: () -> Unit,
+        private val onPageStarted: () -> Unit,
         private val onPageFinished: () -> Unit,
     ) : WebViewClient() {
+
+        override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            // A new document is replacing the old one, so any bridge channel
+            // bound to the old one is dead and must not be reused.
+            if (WebOrigin.isAppOrigin(url)) onPageStarted()
+        }
 
         override fun onPageFinished(view: WebView, url: String?) {
             super.onPageFinished(view, url)

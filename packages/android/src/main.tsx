@@ -19,7 +19,8 @@ import { createBridge, type Bridge } from "./bridge"
 import { createAndroidDraftStore } from "./drafts"
 import { revealFocusedInput } from "./focus"
 import { createAndroidPlatform, readHostInfo } from "./platform"
-import { startupServerKey } from "./server"
+import { SERVER_KEY, SERVER_STORE, storedServerKey, type StoredServer } from "./server"
+import { AndroidServerSetup } from "./setup"
 import "./styles.css"
 
 /**
@@ -53,22 +54,29 @@ const HANDSHAKE_TIMEOUT_MS = 1_500
 
 function connectBridge(): Promise<Bridge> {
   return new Promise((resolve) => {
-    let settled = false
-    const finish = (port?: MessagePort) => {
-      if (settled) return
-      settled = true
-      window.removeEventListener("message", onMessage)
-      clearTimeout(timer)
-      resolve(createBridge(port))
-    }
+    let bridge: Bridge | undefined
 
+    // The listener is never removed. The host rebuilds its channel whenever the
+    // document it belonged to goes away, and a later handshake has to be adopted
+    // rather than ignored - a renderer still holding a port whose host end has
+    // been closed simply goes quiet, with no error anywhere, which is a far worse
+    // failure than the one it replaces.
     const onMessage = (event: MessageEvent) => {
       if (event.data !== HANDSHAKE) return
-      finish(event.ports?.[0])
+      const port = event.ports?.[0]
+      if (!port) return
+      clearTimeout(timer)
+      if (bridge) bridge.attach(port)
+      else resolve((bridge = createBridge(port)))
     }
 
     window.addEventListener("message", onMessage)
-    const timer = setTimeout(() => finish(undefined), HANDSHAKE_TIMEOUT_MS)
+
+    // Outside the Android host no handshake ever arrives - `vite dev` in a
+    // desktop browser, or a test - so settle with an unavailable bridge.
+    const timer = setTimeout(() => {
+      if (!bridge) resolve((bridge = createBridge(undefined)))
+    }, HANDSHAKE_TIMEOUT_MS)
   })
 }
 
@@ -244,21 +252,28 @@ function AndroidRoot(props: { bridge: Bridge }) {
   onCleanup(answerBack(props.bridge, back))
 
   /**
-   * The server to start on, read from the persisted default.
+   * The configured server, or null on a fresh install.
    *
-   * Mirrors what desktop does with the same `Platform.getDefaultServer` hook.
-   * `startupServerKey` guarantees a non-empty result, without which
-   * `ServerProvider` renders nothing at all - see server.ts.
+   * `AppInterface` cannot be rendered without one - see setup.tsx - so this
+   * gates it rather than merely choosing a default.
    */
-  const [startupServer] = createResource(async () => {
+  const [storedServer, { mutate: setStoredServer }] = createResource(async () => {
     try {
-      return (await platform.getDefaultServer?.()) ?? null
+      const raw = await platform.storage?.(SERVER_STORE)?.getItem(SERVER_KEY)
+      return typeof raw === "string" ? (JSON.parse(raw) as StoredServer) : null
     } catch {
       // A store that cannot be read must not stop the app from starting; the
-      // user lands on the no-server state and can pick one.
+      // user lands on setup and configures one again.
       return null
     }
   })
+
+  const saveServer = (server: StoredServer) => {
+    setStoredServer(server)
+    void platform.storage?.(SERVER_STORE)?.setItem(SERVER_KEY, JSON.stringify(server))
+    // So the choice survives even if this store is later cleared independently.
+    void platform.setDefaultServer?.(storedServerKey(server) as never)
+  }
 
   const [locale] = createResource(async () => {
     const raw = platform.storage?.("opencode.global.dat")
@@ -274,12 +289,17 @@ function AndroidRoot(props: { bridge: Bridge }) {
   return (
     <PlatformProvider value={platform}>
       <AppBaseProviders locale={locale.latest}>
-        <Show when={!locale.loading && !startupServer.loading} fallback={<LoadingSplash />}>
-          <AppInterface
-            defaultServer={ServerConnection.Key.make(startupServerKey(startupServer.latest))}
-            router={(routerProps) => <AndroidRouter {...routerProps} back={back} />}
-            serverScoped={<AndroidBackHandlers back={back} />}
-          />
+        <Show when={!locale.loading && !storedServer.loading} fallback={<LoadingSplash />}>
+          <Show when={storedServer.latest} fallback={<AndroidServerSetup onConnected={saveServer} />}>
+            {(server) => (
+              <AppInterface
+                defaultServer={ServerConnection.Key.make(storedServerKey(server()))}
+                servers={[{ type: "http", http: { ...server() } }]}
+                router={(routerProps) => <AndroidRouter {...routerProps} back={back} />}
+                serverScoped={<AndroidBackHandlers back={back} />}
+              />
+            )}
+          </Show>
         </Show>
       </AppBaseProviders>
     </PlatformProvider>

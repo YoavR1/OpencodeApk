@@ -809,6 +809,47 @@ Divergence **D7** adds the origin, in the same pattern upstream already uses for
 Electron's `oc://renderer`. The consequence is that **M5 needs a server built
 from this repository** until that lands upstream. See ADR-0019.
 
+### Reachability — the constraint that shapes both modes
+
+The app is served from `https://appassets.androidplatform.net`, which makes it a
+**secure context**, and a secure context may not issue plaintext requests. This
+is enforced by the browser before any socket opens, so no Android setting
+changes it. Verified on a device (ADR-0021):
+
+| Server | Reachable from the app? |
+|---|---|
+| `https://…` anywhere | ✅ |
+| `http://127.0.0.1:<port>` — **M7's on-device server** | ✅ *potentially trustworthy* origin |
+| `http://<LAN address>` | ❌ blocked as mixed content |
+
+The end goal sits in the exempt row, so this costs M7 nothing. It costs M5 the
+plain-http LAN case, which is why `setup.tsx` refuses such an address at entry
+rather than saving a server that can never connect.
+
+### First run
+
+The shared UI **cannot render with an empty server list** — `LayoutProvider`'s
+init reads `serverSdk().scope`, and there is no server context to read. Upstream
+never meets this because web is served by its own server and desktop always has a
+sidecar. Android is the first case with none, so `setup.tsx` stands in front of
+`AppInterface` until one exists (ADR-0020).
+
+### The bridge, on real hardware
+
+Two host-side rules that only a device revealed, both now enforced in
+`BridgePort` rather than left to callers:
+
+- **Replies are marshalled to the WebView thread.** Handlers reply from
+  `Dispatchers.IO`, and `WebMessagePort.postMessage` throws off the WebView's
+  own thread — silently, into a `runCatching`.
+- **`connect()` is idempotent per document.** `onPageFinished` fires more than
+  once on a cold start, and rebuilding the channel each time strands the page on
+  a port whose host end has just been closed. A genuinely new document
+  invalidates the channel through `onPageStarted` instead.
+
+The renderer also **adopts a later handshake** rather than ignoring it, so a
+host-side rebuild reconnects instead of going quiet.
+
 ### Streaming
 
 Session events arrive over `fetch` + `response.body.getReader()`, not
