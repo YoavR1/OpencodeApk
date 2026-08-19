@@ -18,7 +18,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | **the app starts its own server on device** |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | **projects and Git on device; terminals deferred (ADR-0025)** |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | **in progress — 8/10 device checks pass; 2 need a provider credential** |
-| M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | not started |
+| M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | **in progress — threat review done, 3 findings fixed; `auth.json` and the session DB deferred with reasons** |
 | M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | not started |
 
 `docs/CURRENT_STATUS.md` is authoritative for status. This table is a summary.
@@ -359,12 +359,34 @@ the project real.
 6. Decide and document the data-at-rest posture for the server's SQLite database.
 
 **Exit criteria**
-- [ ] Credentials Keystore-backed (test).
-- [ ] Every permission justified in writing.
-- [ ] Loopback-only binding verified by test.
-- [ ] Bridge surface reviewed and documented.
-- [ ] Log audit shows no secret leakage.
-- [ ] Security review recorded in `DECISIONS.md`.
+- [x] Credentials Keystore-backed (test).
+      *Everything the app stores — remote-server credentials, drafts, UI state —
+      is AES-256-GCM under a non-exportable Keystore key, and opaque on disk.
+      **Provider API keys are the exception**: upstream writes them to
+      `auth.json` in plaintext at mode 0600. Documented as the top residual risk
+      with a concrete proposal, `docs/SECURITY.md` §3, rather than closed.*
+- [x] Every permission justified in writing.
+      *Five requested, each with a manifest comment; CI fails on a forbidden one.*
+- [x] Loopback-only binding verified by test.
+      *On hardware: the app's uid owns exactly one LISTEN socket, `0100007F:4096`.
+      Unauthenticated and wrong-password requests both return 401.*
+- [x] Bridge surface reviewed and documented.
+      *`docs/SECURITY.md` §5–6. A CSP was added and verified on-device by running
+      the attacks; the notification-tag injection path was found and closed.*
+- [x] Log audit shows no secret leakage.
+      *0 secret-shaped tokens in the app's own logcat lines. Weakened by this
+      OEM suppressing third-party logs, so `SafeLogTest` is the stronger evidence.*
+- [x] Security review recorded in `DECISIONS.md`.
+      *ADR-0028 (CSP), ADR-0029 (runtime updates), ADR-0030 (notification tags).*
+- [ ] Data-at-rest posture for the server's SQLite database (task 6).
+      *Not decided. The database holds session content and lives in the app
+      sandbox, unencrypted. It needs the same discussion as `auth.json` and was
+      deferred with it.*
+
+**Found while doing this milestone**
+- A stale extracted runtime could survive an upgrade (ADR-0029) — which also
+  invalidated an M9 measurement, corrected in `docs/LIFECYCLE.md` §4.
+- Seven new APK-level CI gates, three of them mutation-tested.
 
 ---
 

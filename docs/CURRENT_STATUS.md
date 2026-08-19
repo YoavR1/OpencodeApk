@@ -6,16 +6,131 @@
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-19 |
-| **Session** | M9 lifecycle and resilience |
+| **Last updated** | 2026-08-20 |
+| **Session** | M10 security and credential storage |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M9 — lifecycle verified on hardware; 8 of 10 checklist items pass, 2 need a provider credential** |
-| **Next milestone** | **M10 — see `docs/IMPLEMENTATION_PLAN.md`** |
-| **Next prompt** | **`prompts/10_*.md`** |
+| **Current milestone** | **M10 — threat review complete; 3 findings fixed; provider-key encryption deferred with a written reason** |
+| **Next milestone** | **M11 — polish and release** |
+| **Next prompt** | **`prompts/11_*.md`** |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
 > needs no external server. This is not project completion.
+
+---
+
+## M10: a threat review, and three things it found
+
+Full review in **`docs/SECURITY.md`**. Summary of what changed.
+
+### 1. The WebView had no Content-Security-Policy
+
+The bridge can read the Keystore-backed store, the clipboard and draft blobs, and
+the UI renders model output, file contents and diffs — text nobody in the loop
+controls. One injection at the app origin is credential disclosure, not a defaced
+page.
+
+A CSP is now attached as a **response header** by the asset handler (a `<meta>`
+tag is content, and content is what an injection controls). Verified on the
+device by running the attacks rather than reading the header:
+
+```json
+{ "scriptRan": false,
+  "violations": [ "script-src-elem blocked inline",
+                  "base-uri blocked https://example.com/",
+                  "img-src blocked https://example.com/pixel.png?stolen=secret" ] }
+```
+
+ADR-0028. Two directives are deliberately weaker (`style-src 'unsafe-inline'`,
+`connect-src https:`) and are written down as residual risks rather than hidden.
+
+### 2. The device was running a runtime two milestones old
+
+`RuntimeAssets` skipped re-extraction on a marker digested from the asset
+*listing* plus the version *name*. File contents are not in a listing, and
+`versionName` is a constant during development — so a changed bundle with
+unchanged filenames was **never re-extracted**:
+
+```
+$ adb shell run-as ai.opencode.android grep -c 'parent-gone' files/runtime/launch.mjs
+0        # the M9 launcher had never reached the device
+```
+
+That is a security property, not a caching detail: a fix shipped inside the
+bundle would silently not apply. The marker now includes the installed package's
+`lastUpdateTime` and version code. After the fix the same command returns `2`.
+ADR-0029.
+
+**This invalidated an M9 claim** — see the correction below.
+
+### 3. An exported Activity trusted an Intent extra
+
+`MainActivity` is exported because it is the launcher. It relayed `EXTRA_TAG`
+from any Intent to the renderer as a `notification.clicked` event, firing a
+callback the UI had registered. Any app could send it. Tags are now checked
+against the ones this process actually posted, and consumed on use — so a
+replayed Intent is not a second tap either. ADR-0030.
+
+### Verified on the device
+
+| Property | Evidence |
+|---|---|
+| Local server binds loopback only | the app's uid owns one LISTEN socket: `0100007F:4096`; nothing on `00000000` |
+| Auth cannot be bypassed | no credentials → **401**; wrong password → **401** |
+| Nothing is readable outside the app uid | no file under `files/` or `shared_prefs/` |
+| Stored values are opaque | ciphertext in `shared_prefs/*.xml` |
+| No secret in logcat | 0 matches in the app's own lines |
+| Nothing is downloaded at runtime | every binary and every line of server JS ships in the signed APK |
+
+### CI now gates the APK, not just the source
+
+Seven new checks in `scripts/ci/verify-apk.sh`; three mutation-tested by
+deliberately breaking the property:
+
+- exported components ≤ 2 — a third → `[FAIL] unexpected exported components: 3`
+- `allowBackup="false"` — flipped → `[FAIL] allowBackup is not false`
+- release denies cleartext — shipped the debug config → `[FAIL] release permits
+  cleartext by default`
+
+`aapt2` is now found inside the SDK when it is not on `PATH`. Without that these
+checks degraded to warnings, which reads like a pass and is not one.
+
+### Not fixed, deliberately
+
+**Provider API keys are plaintext on disk.** Upstream writes them:
+
+```ts
+// packages/opencode/src/auth/index.ts
+yield* fsys.writeJson(file, { ...data, [norm]: info }, 0o600)
+```
+
+Encrypting them means forking upstream's auth path, on the hot path of every
+provider call — against `.claude/rules/architecture.md` A1. What protects them
+today is the app sandbox, `allowBackup="false"`, and a non-debuggable release.
+What does not is a rooted device. `docs/SECURITY.md` §3 carries the full
+reasoning and a concrete proposal (`OPENCODE_AUTH_CONTENT`) with its own
+trade-off stated. The session database is deferred with it.
+
+---
+
+## Correction to M9: the orphan result was Android's doing, not the watchdog's
+
+M9 said the runtime "shuts down on stdin EOF" and cited the no-orphan
+measurements as support. Two things were wrong:
+
+1. The watchdog **was never in the APK**. `apps/android/runtime/launch.mjs` is
+   staged into assets by `scripts/runtime/prepare-android-runtime.py`, which was
+   not re-run — and the stale-marker bug above meant it would not have been
+   re-extracted even if it had been.
+2. Re-tested properly with a **control run**: killing only the app process, with
+   the watchdog *removed*, the runtime died anyway. On this device Android kills
+   the child itself.
+
+What is true, measured after staging it: run with stdin already closed, the
+launcher exits after **4 seconds**, versus running indefinitely when the host
+holds the pipe open. So the watchdog works — it is defence-in-depth for OEMs
+that behave differently, and its value on *this* hardware is unproven because
+the platform gets there first. `docs/LIFECYCLE.md` §4 is corrected.
 
 ---
 
@@ -343,6 +458,10 @@ meant four defects away from functioning. That distinction is already in
 | Remote LAN server over HTTP | **Impossible** from this origin (ADR-0021). Needs https or a tunnel. |
 | CI re-run for this work | Local suites are green; CI has not yet run these commits. |
 | Foreground service observed during a turn | Lifecycle items 5 and 6. Needs a provider credential; the idle policy (item 4) is verified. |
+| **Provider API keys encrypted at rest** | Upstream writes `auth.json` in plaintext at mode 0600; encrypting it forks upstream's auth path. `docs/SECURITY.md` §3. |
+| **Session database at rest** | Unencrypted in the app sandbox. Deferred with `auth.json` — the same decision. |
+| An adversarial app probing the exported Activity / loopback port | The properties were established from the merged manifest and socket measurements, not by installing a hostile app. ASSUMED, not VERIFIED. |
+| Signing and R8 | M11. The release APK is currently unsigned and unshrunk. |
 | Basic auth against a live server | The test server ran unsecured, so no credential entered the source. `createSdkForServer` is upstream code and unchanged. |
 
 ## Recommended next session

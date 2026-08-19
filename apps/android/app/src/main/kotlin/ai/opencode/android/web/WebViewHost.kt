@@ -80,14 +80,55 @@ object WebViewHost {
      * the APK may carry later. `AssetsPathHandler` resolves relative to the
      * assets root, so this handler re-prefixes each request.
      */
-    private class WebAssetsHandler(context: Context) : WebViewAssetLoader.PathHandler {
+    private class WebAssetsHandler(private val context: Context) : WebViewAssetLoader.PathHandler {
         private val delegate = WebViewAssetLoader.AssetsPathHandler(context)
 
-        override fun handle(path: String): WebResourceResponse? =
-            delegate.handle(ASSET_SUBDIR + path.trimStart('/'))
+        /**
+         * Computed once, from the packaged document, on first use.
+         *
+         * Reading an asset is cheap but not free, and this runs on the WebView's
+         * resource thread for every request the loader handles.
+         */
+        private val policy: String by lazy {
+            val html = runCatching {
+                context.assets.open(ASSET_SUBDIR + DOCUMENT).use { it.readBytes().toString(Charsets.UTF_8) }
+            }.getOrElse {
+                // A policy without the document's own hashes would block the app's
+                // theme preload. Failing closed here would be failing to start, so
+                // the loss is that one inline script; everything else still applies.
+                SafeLog.w("could not read $DOCUMENT to hash its inline scripts", it)
+                ""
+            }
+            ContentSecurityPolicy.forDocument(ContentSecurityPolicy.inlineScriptHashes(html))
+        }
+
+        override fun handle(path: String): WebResourceResponse? {
+            val response = delegate.handle(ASSET_SUBDIR + path.trimStart('/')) ?: return null
+
+            // Only the document carries the policy. Attaching it to every asset
+            // would be noise: a CSP applies to the context a document creates,
+            // and a stylesheet does not create one.
+            if (isDocument(path)) {
+                response.responseHeaders = (response.responseHeaders ?: emptyMap()) +
+                    mapOf(
+                        "Content-Security-Policy" to policy,
+                        // The document is same-origin only; nothing should be
+                        // sniffing a type or framing this.
+                        "X-Content-Type-Options" to "nosniff",
+                        "Referrer-Policy" to "no-referrer",
+                    )
+            }
+            return response
+        }
+
+        private fun isDocument(path: String): Boolean {
+            val clean = path.substringBefore('?').trimStart('/')
+            return clean.isEmpty() || clean.endsWith(".html", ignoreCase = true)
+        }
 
         private companion object {
             const val ASSET_SUBDIR = "web/"
+            const val DOCUMENT = "index.html"
         }
     }
 

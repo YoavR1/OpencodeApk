@@ -1162,3 +1162,118 @@ Backgrounding while idle holds nothing; measured on the device as **0**
 mid-turn clears `busy` before it reports `failed`, or the service would be held
 for the life of the app.
 
+---
+
+## ADR-0028 — The app document is served with a Content-Security-Policy
+
+**Status:** accepted (M10)
+
+### Context
+
+The bridge is reachable by any script running at the app origin, and it can read
+the Keystore-backed store, the clipboard and draft blobs. The UI renders model
+output, file contents and diffs — text the user did not write and the model does
+not control either. One injection at the app origin is therefore not a defaced
+page; it is credential disclosure.
+
+Upstream ships no CSP: the web build is served from a static host with a
+`_headers` file that sets content types only.
+
+### Decision
+
+`WebViewHost`'s asset handler attaches a CSP response header to the document.
+Not a `<meta>` tag: a meta tag is content, and content is what an injection
+controls.
+
+Inline script hashes are computed from the packaged `index.html` at runtime.
+Upstream's theme preload must run before the bundle to avoid a flash of the wrong
+colour scheme, so it cannot move to a file; naming it by hash permits exactly
+that script and no other. Deriving the hash from the asset means an upstream
+change cannot silently produce a policy that blocks the app's own code.
+
+Two directives are deliberately weaker than the rest, and are recorded as
+residual risks in `docs/SECURITY.md` §6 rather than hidden:
+
+- `style-src 'unsafe-inline'` — the preload injects a `<style>` whose content
+  varies with the theme, so it cannot be hashed. Injected CSS cannot reach the
+  bridge.
+- `connect-src https:` — remote-server mode (ADR-0021) points the UI at a host
+  the user types, unknown at build time. This should become `'self'` plus
+  loopback when remote mode retires.
+
+`img-src` deliberately excludes remote hosts: a remote image URL in model output
+is the cheapest exfiltration channel there is, and the cost of refusing it is a
+broken image rather than a broken app.
+
+### Consequences
+
+Verified on the device by attempting the attacks rather than reading the header:
+an injected inline script did not execute, and both `base-uri` takeover and
+remote-image exfiltration were refused. The app renders and the runtime reaches
+`ready` with the policy in force.
+
+---
+
+## ADR-0029 — The extracted runtime is keyed to the installed package
+
+**Status:** accepted (M10)
+
+### Context
+
+`RuntimeAssets` skips re-extraction when a marker matches. The marker was a
+digest of the asset *listing* plus the version *name*. File contents are not in a
+listing, and `versionName` is a constant during development.
+
+So a changed bundle whose filenames had not changed was never re-extracted. The
+device kept executing old JavaScript while reporting the new version — found by
+comparing the device against the APK, which showed a launcher two milestones old.
+
+### Decision
+
+The marker includes the installed package's `lastUpdateTime` and version code,
+both set by the package manager on every install and upgrade, including a debug
+reinstall of an identical version.
+
+Digesting the asset *contents* would state the property more directly, but it
+means reading 37 MB before the server can start, on every launch, to answer a
+question the package manager has already answered.
+
+If the package cannot be read the fallback is *unique* rather than stable, so the
+failure mode is an unnecessary copy rather than a silently stale runtime.
+
+### Consequences
+
+This is a security property, not a caching detail: a fix shipped inside the
+bundle would otherwise silently not apply. `RuntimeAssetsTest` pins it, including
+the exact case that failed — same version name, new install.
+
+It also invalidated an M9 measurement. The stdin-EOF watchdog added in M9 was
+never staged into the APK, so it had never run on the device; the M9 orphan
+result was Android's process-group kill. See `docs/LIFECYCLE.md` §4.
+
+---
+
+## ADR-0030 — Notification tags are claimed, not trusted
+
+**Status:** accepted (M10)
+
+### Context
+
+`MainActivity` is exported, because it is the launcher. It read
+`EXTRA_TAG` from its Intent and relayed it to the renderer as a
+`notification.clicked` event, which fires whatever callback the UI registered for
+that tag. Any app on the device could send that extra.
+
+### Decision
+
+`Notifications` remembers the tags this process actually posted, bounded to the
+most recent 64, in memory only. `MainActivity` relays a tag only if it can claim
+it, and claiming consumes it.
+
+### Consequences
+
+The impact was low — an attacker must guess a tag and can only trigger the app's
+own callback — but the fix costs nothing and removes the question. Consuming on
+use also means a replayed Intent is not a second tap, which was a real bug
+independent of the security framing.
+

@@ -77,6 +77,7 @@ class Notifications(private val context: Context) {
         // helper, and an explicit catch is what it asks for.
         return try {
             NotificationManagerCompat.from(context).notify(tag, NOTIFICATION_ID, notification)
+            remember(tag)
             true
         } catch (e: SecurityException) {
             SafeLog.w("not permitted to post notification", e)
@@ -91,5 +92,42 @@ class Notifications(private val context: Context) {
         const val CHANNEL_ID = "opencode.sessions"
         const val EXTRA_TAG = "opencode.notification.tag"
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * Tags this process has actually posted.
+         *
+         * `MainActivity` is exported - it has to be, it is the launcher - so any
+         * app on the device can start it with an arbitrary [EXTRA_TAG] and have
+         * that string delivered to the renderer as a `notification.clicked`
+         * event. The blast radius is small (it can only fire a callback the app
+         * itself registered, and only by guessing its tag) but the fix costs
+         * nothing: a tag that was never posted cannot have been tapped.
+         *
+         * In memory only. A tap can only follow a notification this process
+         * posted, and process death takes the notification's callback with it.
+         *
+         * Bounded so a long-lived process cannot grow this without limit; the
+         * oldest entry is dropped, which at worst ignores a tap on a very old
+         * notification.
+         */
+        private val posted = object : LinkedHashMap<String, Unit>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?) = size > MAX_REMEMBERED
+        }
+
+        private const val MAX_REMEMBERED = 64
+
+        @Synchronized
+        private fun remember(tag: String) {
+            posted[tag] = Unit
+        }
+
+        /**
+         * Whether [tag] names a notification this process posted.
+         *
+         * Consumes it: a tap is a single event, and a replayed intent is not a
+         * second tap.
+         */
+        @Synchronized
+        fun claimPosted(tag: String): Boolean = posted.remove(tag) != null
     }
 }

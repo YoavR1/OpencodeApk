@@ -202,10 +202,20 @@ class MainActivity : AppCompatActivity() {
         consumeNotificationTag(intent)
     }
 
-    /** Relays a tapped notification's tag to the renderer, once. */
+    /**
+     * Relays a tapped notification's tag to the renderer, once.
+     *
+     * The tag is checked against the ones this process posted rather than
+     * trusted. This Activity is exported - it is the launcher - so the extra can
+     * come from any app on the device, not only from our own PendingIntent.
+     */
     private fun consumeNotificationTag(intent: Intent?) {
         val tag = intent?.getStringExtra(Notifications.EXTRA_TAG) ?: return
         intent.removeExtra(Notifications.EXTRA_TAG)
+        if (!Notifications.claimPosted(tag)) {
+            SafeLog.w("ignored a notification tag this app did not post")
+            return
+        }
         if (bridgePort.connected) bridgeHost.emitNotificationClicked(tag)
     }
 

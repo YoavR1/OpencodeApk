@@ -11,7 +11,7 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 
 | Layer | Status |
 |---|---|
-| Android JVM unit tests | ✅ **119 tests**, run in CI by `testDebugUnitTest` |
+| Android JVM unit tests | ✅ **141 tests**, run in CI by `testDebugUnitTest` |
 | Android instrumented tests | ✅ **21 tests, RUN AND PASSING on a OnePlus 15** (M5–M8) — locally, not in CI |
 | Renderer tests | ✅ **98 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
 | Device verification | ✅ **the app runs, connects and streams** — see `docs/CURRENT_STATUS.md` |
@@ -115,6 +115,19 @@ Fast, no device. Run by `./gradlew test`.
 | Network policy | **The release config denies cleartext**, and only debug permits it | M5 | ✅ |
 | Network policy | Cleartext is permitted to loopback and nothing else | M5 | ✅ |
 | Network policy | **Neither config installs a trust anchor** (TLS verification intact) | M5 | ✅ |
+| CSP | Scripts: no `unsafe-inline`, no `unsafe-eval`, hashes only | M10 | ✅ |
+| CSP | `wasm-unsafe-eval` does not readmit `eval` | M10 | ✅ |
+| CSP | **Remote images are refused** (the cheap exfiltration channel) | M10 | ✅ |
+| CSP | Loopback reachable on any port; no arbitrary cleartext | M10 | ✅ |
+| CSP | `object-src`/`frame-src`/`base-uri`/`form-action`/`frame-ancestors` closed | M10 | ✅ |
+| CSP | Inline scripts hashed exactly; external ones are not hashed | M10 | ✅ |
+| CSP | **The real packaged `index.html` still yields a hash** | M10 | ✅ |
+| Notification tags | A tag this app never posted is refused | M10 | ✅ |
+| Notification tags | A posted tag is accepted exactly once (no replay) | M10 | ✅ |
+| Notification tags | Bounded memory; oldest dropped | M10 | ✅ |
+| Runtime updates | **A new install re-extracts even with an identical version name** | M10 | ✅ |
+| Runtime updates | An unchanged install does not re-extract | M10 | ✅ |
+| Runtime updates | An unrecognised marker is replaced, not trusted | M10 | ✅ |
 | Runtime lifecycle | **A runtime that died is restarted, not handed back dead** | M9 | ✅ |
 | Runtime lifecycle | A degraded (alive but quiet) runtime is left alone | M9 | ✅ |
 | Runtime lifecycle | `alive` separates a process that exists from one that does not | M9 | ✅ |
@@ -270,6 +283,13 @@ with the vendoring merge and are unmodified.
 | Application id is `ai.opencode.android` | `scripts/ci/verify-apk.sh` | M2 | ✅ |
 | APK declares a launchable activity | `scripts/ci/verify-apk.sh` | M2 | ✅ |
 | APK requests no forbidden permission | `scripts/ci/verify-apk.sh` | M2 | ✅ |
+| **At most 2 exported components** | `scripts/ci/verify-apk.sh` | M10 | ✅ mutation-tested (a third → FAIL) |
+| **`allowBackup` is false** | `scripts/ci/verify-apk.sh` | M10 | ✅ mutation-tested (true → FAIL) |
+| Release APK is not debuggable | `scripts/ci/verify-apk.sh` | M10 | ✅ |
+| No blanket `usesCleartextTraffic` | `scripts/ci/verify-apk.sh` | M10 | ✅ |
+| **Release denies cleartext by default** | `scripts/ci/verify-apk.sh` | M10 | ✅ mutation-tested (debug config → FAIL) |
+| The cleartext exception is loopback-only | `scripts/ci/verify-apk.sh` | M10 | ✅ |
+| The packaged launcher does not bind `0.0.0.0` | `scripts/ci/verify-apk.sh` | M10 | ✅ |
 | APK contains `arm64-v8a` | `scripts/ci/verify-apk.sh` | M7 | ⬜ no native libs yet |
 | Release APK signs and builds | CI | M11 | ⬜ |
 
@@ -299,6 +319,13 @@ Some things only a human with a phone can confirm. Record results in
 | A killed runtime is detected and restarted | M9 | ✅ `27543 → 28793`, app pid unchanged |
 | SIGKILL mid-session does not corrupt the database | M9 | ✅ WAL reopened, stale lock cleared, session rehydrated |
 | Foreground-service notification appears during a turn and clears after | M9 | ⬜ needs a provider credential |
+| **CSP is enforced on-device** (injected script blocked, exfiltration refused) | M10 | ✅ 3 violations recorded, `scriptRan: false` |
+| Local server refuses unauthenticated requests | M10 | ✅ 401 with no credentials and with a wrong password |
+| Local server binds loopback only | M10 | ✅ the app's uid owns one LISTEN socket, `0100007F:4096` |
+| No app file is readable outside the app uid | M10 | ✅ |
+| Stored values are opaque on disk | M10 | ✅ ciphertext in `shared_prefs/*.xml` |
+| No secret appears in logcat | M10 | 🟡 0 matches, but this OEM suppresses third-party logs |
+| The device runs the runtime the APK shipped | M10 | ✅ was stale before the fix; `2` after |
 
 ---
 

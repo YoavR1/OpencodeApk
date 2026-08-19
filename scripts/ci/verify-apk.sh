@@ -56,6 +56,19 @@ android.permission.INTERNET
 
 head2 "verify-apk"
 
+# aapt2 is not on PATH in either a stock CI image or a developer shell, but it
+# ships with every build-tools release. Without it the manifest checks below
+# degrade to warnings, which reads like a pass and is not one - so look for it
+# where it actually lives before giving up.
+if ! command -v aapt2 >/dev/null 2>&1; then
+  SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+  CANDIDATE="$(ls -1 "$SDK"/build-tools/*/aapt2 "$SDK"/build-tools/*/aapt2.exe 2>/dev/null | sort -V | tail -1)"
+  if [ -n "$CANDIDATE" ]; then
+    PATH="$(dirname "$CANDIDATE"):$PATH"
+    export PATH
+  fi
+fi
+
 APK="${1:-}"
 if [ -z "$APK" ]; then
   APK="$(find . -name '*debug*.apk' -path '*outputs*' -not -path './.git/*' 2>/dev/null | head -1)"
@@ -68,8 +81,16 @@ if [ -z "$APK" ] || [ ! -f "$APK" ]; then
   exit 3
 fi
 
+# Some checks apply only to a shipping build - a debug APK is deliberately
+# debuggable and deliberately permits cleartext to a LAN dev server (ADR-0018).
+case "$APK" in
+  *release*) VARIANT="release" ;;
+  *)         VARIANT="debug" ;;
+esac
+
 say "apk  : $APK"
 say "size : $(du -h "$APK" | cut -f1)"
+say "type : $VARIANT"
 
 # An APK that exists but is a stub is worse than none: it looks like success.
 APK_BYTES="$(wc -c < "$APK" | tr -d ' ')"
@@ -198,6 +219,103 @@ else
       bad "required permission missing: $perm"
     fi
   done
+fi
+
+# ------------------------------------------------------------ security posture
+# M10. These are the properties a threat review established; they are checked
+# here because a manifest merge or a build-type mistake can undo any of them
+# silently, and the APK is the only artifact that reflects what actually ships.
+head2 "security posture"
+
+MANIFEST=""
+if command -v aapt2 >/dev/null 2>&1; then
+  MANIFEST="$(aapt2 dump xmltree --file AndroidManifest.xml "$APK" 2>/dev/null)"
+elif command -v aapt >/dev/null 2>&1; then
+  MANIFEST="$(aapt dump xmltree "$APK" AndroidManifest.xml 2>/dev/null)"
+fi
+
+if [ -z "$MANIFEST" ]; then
+  warn "could not decode the manifest; skipping the posture checks (not treated as a pass)"
+else
+  # Exported components are the app's attack surface from other apps on the
+  # device. Exactly one is expected: the launcher activity.
+  EXPORTED="$(grep -c 'android:exported([^)]*)=true' <<< "$MANIFEST" || true)"
+  # Two are expected and no more: MainActivity (it is the launcher, so it must
+  # be) and androidx's ProfileInstallReceiver, which is guarded by the signature
+  # permission android.permission.DUMP. A third means new attack surface.
+  if [ "$EXPORTED" -le 2 ]; then
+    good "exported components: $EXPORTED (launcher activity + androidx's DUMP-guarded profile receiver)"
+  else
+    bad "unexpected exported components: $EXPORTED - each is reachable by any app on the device"
+  fi
+
+  # A debuggable release APK would let any user attach a debugger to the process
+  # holding the provider credentials.
+  if [ "$VARIANT" = "release" ]; then
+    if grep -q 'android:debuggable([^)]*)=true' <<< "$MANIFEST"; then
+      bad "release APK is debuggable - a debugger could attach to the process holding credentials"
+    else
+      good "release APK is not debuggable"
+    fi
+
+    # usesCleartextTraffic must be absent: the policy is the network security
+    # config, and setting the attribute would override it for every host.
+    if grep -q 'android:usesCleartextTraffic([^)]*)=true' <<< "$MANIFEST"; then
+      bad "usesCleartextTraffic is set - it overrides the network security config for every host"
+    else
+      good "no blanket usesCleartextTraffic; the network security config governs"
+    fi
+  fi
+
+  if grep -q 'android:networkSecurityConfig' <<< "$MANIFEST"; then
+    good "a network security config is declared"
+
+    # WHICH config ships is the point. Debug replaces the file wholesale with one
+    # that permits cleartext everywhere (ADR-0018), so a release built from the
+    # wrong source set would look identical here. Resource file names are
+    # obfuscated in release, so resolve the id rather than guessing the path.
+    NSC_FILE="$(aapt2 dump resources "$APK" 2>/dev/null |
+      grep -A1 'xml/network_security_config' | grep -oE 'res/[^ ]+\.xml' | head -1)"
+    if [ -z "$NSC_FILE" ]; then
+      warn "could not resolve the network security config resource (not treated as a pass)"
+    else
+      NSC="$(aapt2 dump xmltree --file "$NSC_FILE" "$APK" 2>/dev/null)"
+      BASE_CLEARTEXT="$(sed -n '/E: base-config/,/E: domain-config/p' <<< "$NSC" |
+        grep -oE 'cleartextTrafficPermitted=(true|false)' | head -1)"
+      if [ "$VARIANT" = "release" ]; then
+        if [ "$BASE_CLEARTEXT" = "cleartextTrafficPermitted=false" ]; then
+          good "release denies cleartext by default"
+        else
+          bad "release permits cleartext by default ($BASE_CLEARTEXT) - the debug config may have shipped"
+        fi
+        # The loopback exception is intended and must stay scoped to loopback.
+        OTHER="$(grep -oE "T: '[^']+'" <<< "$NSC" | grep -vE "'(127\.0\.0\.1|localhost)'" || true)"
+        if [ -n "$OTHER" ]; then
+          bad "the cleartext exception covers hosts beyond loopback: $(tr '
+' ' ' <<< "$OTHER")"
+        else
+          good "the cleartext exception is scoped to loopback only"
+        fi
+      fi
+    fi
+  else
+    bad "no network security config - cleartext would follow the platform default"
+  fi
+
+  if grep -q 'android:allowBackup([^)]*)=false' <<< "$MANIFEST"; then
+    good "allowBackup is false - credentials and the session database are not exported"
+  else
+    bad "allowBackup is not false"
+  fi
+fi
+
+# The runtime must not be reachable off-device. Loopback is asserted in code and
+# tested on hardware; here we check the packaged launcher does not default
+# otherwise, which is the one place a change would be easy to miss.
+if unzip -p "$APK" assets/runtime/launch.mjs 2>/dev/null | grep -q '0\.0\.0\.0'; then
+  bad "the packaged launcher mentions 0.0.0.0 - the server must default to loopback"
+else
+  good "the packaged launcher does not bind 0.0.0.0"
 fi
 
 head2 "result"

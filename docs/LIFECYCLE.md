@@ -68,6 +68,20 @@ launcher does not rely on it. The host holds the child's **stdin** open for
 exactly as long as it lives; EOF on that pipe means the app is gone, whatever way
 it went, and the runtime shuts down on it.
 
+**How much of that is measured, precisely** (corrected in M10):
+
+- *The watchdog works.* Run with stdin already closed, the launcher starts,
+  reaches EOF and exits after **4 seconds** — versus running indefinitely in the
+  normal case, where the host holds the pipe open.
+- *This device never needs it.* Killing only the app process, with the watchdog
+  **removed**, the runtime died anyway. So on a OnePlus 15 the observed
+  no-orphan behaviour is Android's doing, not the watchdog's.
+
+The watchdog is therefore defence-in-depth against OEMs that behave differently,
+and its value on *this* hardware is unproven because the platform gets there
+first. The M9 write-up implied the watchdog was what produced the result; a
+control run in M10 showed otherwise.
+
 That is why `EmbeddedProcessRuntime` must never close `process.outputStream` —
 doing so would look like tidying up and would kill the runtime.
 
@@ -143,6 +157,10 @@ Run against the debug APK, one session ("Big Pickle") open in project `tmp`.
 | 8 | pass | after `am kill` (the LMK path): app and runtime both gone, no orphan |
 | 9 | pass | reopen: session "Big Pickle" and project `tmp` restored, state `ready` |
 | 10 | pass | `27543 → 28793`, app pid unchanged, `runtime failed: … (exit 137) - restarting` |
+
+**Correction (M10).** Items 7 and 8 pass, but not for the stated reason: a
+control run with the stdin watchdog removed produced the same result, so the
+mechanism on this device is Android's process-group kill. See §4.
 
 Items 5 and 6 are the only ones unverified. They are the foreground-service
 *path*, not its policy: that the service stays absent while idle is item 4, and it
