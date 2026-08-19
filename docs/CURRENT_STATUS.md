@@ -12,7 +12,7 @@
 | **Current milestone** | **M5 — code complete; end-to-end run NOT yet verified** |
 | **Next milestone** | **M6 — local runtime feasibility spike** |
 | **Next prompt** | **`prompts/06_LOCAL_RUNTIME_SPIKE.md`** — but read the caveat below first |
-| **CI** | see the run for this branch's latest commit |
+| **CI** | ✅ green — [run 32252744424](https://github.com/YoavR1/OpencodeApk/actions/runs/32252744424) |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
 > needs no external server. This milestone exists only so the UI↔server path can
@@ -168,6 +168,15 @@ There is no device and no OpenCode server here, so none of this is verified:
 Every M5 test added here covers adapter, protocol or configuration logic. **None
 of them makes a network request.** M5's exit criteria are device criteria, and
 they are open.
+
+**One unmeasured cost, introduced by this milestone.** Encrypting the preference
+store puts a Keystore operation on every write, and `makePersisted` writes on
+every store change — so typing in the prompt now costs a bridge hop *plus* a
+cipher init per keystroke. Both land on `Dispatchers.IO` rather than the main
+thread, and a Keystore AES op is single-digit milliseconds, so this should not
+be visible. But "should not" is reasoning, not measurement: no profiler has run
+on a device. If typing feels laggy, this is the first thing to look at, and the
+fix is to batch or debounce draft writes rather than to weaken the storage.
 
 ---
 
