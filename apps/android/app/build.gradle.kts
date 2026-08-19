@@ -127,6 +127,47 @@ val syncSharedUi by tasks.registering(Sync::class) {
 
 tasks.named("preBuild") { dependsOn(syncSharedUi) }
 
+// ---------------------------------------------------------------------------
+// On-device runtime (M7)
+//
+// The Node runtime and the server bundle are large third-party build outputs, so
+// they are prepared by scripts/runtime/prepare-android-runtime.py rather than
+// committed. A build without them is legitimate - it produces the remote-only
+// app M5 shipped - so this reports what kind of APK is being built instead of
+// failing. The app degrades honestly: runtime.await fails, and the UI falls back
+// to asking for a server.
+// ---------------------------------------------------------------------------
+val reportRuntime by tasks.registering {
+    description = "Reports whether the on-device OpenCode runtime is packaged."
+    group = "verification"
+    outputs.upToDateWhen { false }
+
+    val nativeDir = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
+    val assetsDir = layout.projectDirectory.dir("src/main/assets/runtime")
+
+    doLast {
+        val node = nativeDir.file("libnode.so").asFile
+        val bundle = assetsDir.file("node.js").asFile
+        if (node.exists() && bundle.exists()) {
+            val native = nativeDir.asFile.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val assets = assetsDir.asFile.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            logger.lifecycle(
+                "OpenCode runtime: PACKAGED (%.1f MB native + %.1f MB assets)".format(
+                    native / 1e6,
+                    assets / 1e6,
+                ),
+            )
+        } else {
+            logger.lifecycle(
+                "OpenCode runtime: NOT packaged - this APK needs an external server. " +
+                    "To include it: python scripts/runtime/prepare-android-runtime.py",
+            )
+        }
+    }
+}
+
+tasks.named("preBuild") { dependsOn(reportRuntime) }
+
 // NetworkSecurityConfigTest reads the network security XML off disk, because the
 // release and debug policies never coexist in one build for a runtime check to
 // compare. Gradle cannot see that dependency by itself, so without this the test

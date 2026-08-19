@@ -7,6 +7,7 @@ import ai.opencode.android.platform.DraftStore
 import ai.opencode.android.platform.Notifications
 import ai.opencode.android.platform.PreferenceStore
 import ai.opencode.android.platform.SystemIntegration
+import ai.opencode.android.runtime.RuntimeController
 import ai.opencode.android.util.SafeLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,7 @@ class BridgeHost(
     private val scope: CoroutineScope,
     private val send: (String) -> Unit,
     private val onBackHandled: (token: Int, handled: Boolean) -> Unit = { _, _ -> },
+    private val runtime: RuntimeController? = null,
 ) {
     private val prefs = PreferenceStore(activity.applicationContext)
     private val drafts = DraftStore(activity.applicationContext)
@@ -163,6 +165,43 @@ class BridgeHost(
                     activity.recreate()
                 }
 
+                // ---- the on-device runtime ------------------------------------
+                "runtime.await" -> {
+                    val controller = runtime
+                    if (controller == null) {
+                        send(BridgeContract.failure(id, BridgeContract.Errors.UNAVAILABLE, "no on-device runtime in this build"))
+                    } else {
+                        // Not wrapped in withIo: starting the runtime is its own
+                        // long-running operation with its own dispatcher, and it
+                        // must not occupy an IO thread for the whole startup.
+                        try {
+                            val handle = controller.awaitReady()
+                            send(
+                                BridgeContract.success(
+                                    id,
+                                    JSONObject()
+                                        .put("url", handle.url)
+                                        .put("username", handle.username ?: JSONObject.NULL)
+                                        .put("password", handle.password ?: JSONObject.NULL),
+                                ),
+                            )
+                        } catch (error: Throwable) {
+                            SafeLog.w("runtime.await failed", error)
+                            send(
+                                BridgeContract.failure(
+                                    id,
+                                    BridgeContract.Errors.UNAVAILABLE,
+                                    error.message ?: "the runtime could not be started",
+                                ),
+                            )
+                        }
+                    }
+                }
+                "runtime.stop" -> {
+                    runtime?.stop()
+                    send(BridgeContract.success(id, true))
+                }
+
                 // ---- navigation -----------------------------------------------
                 "back.handled" -> {
                     // Answered on the main thread: the reply races a timeout that
@@ -220,6 +259,10 @@ class BridgeHost(
         send(BridgeContract.event("notification.clicked", mapOf("tag" to tag)))
 
     fun emitBack(token: Int) = send(BridgeContract.event("back", mapOf("token" to token)))
+
+    /** Reports a runtime state change. The password is deliberately not included. */
+    fun emitRuntimeState(state: String, reason: String? = null) =
+        send(BridgeContract.event("runtime.state", mapOf("state" to state, "reason" to reason)))
 
     private companion object {
         const val SERVER_STORE = "servers"

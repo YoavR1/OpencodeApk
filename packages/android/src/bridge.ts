@@ -38,6 +38,14 @@ export type BridgeRequest =
   | { method: "pickDirectory"; params: { title?: string } }
   | { method: "notify"; params: { title: string; body: string; tag: string } }
   | { method: "restart"; params?: never }
+  // --- the on-device runtime --------------------------------------------------
+  /**
+   * Starts the local server if it is not already running and resolves once it
+   * answers a health check. Rejects if it cannot be started, which is how the
+   * renderer knows to offer a remote server instead.
+   */
+  | { method: "runtime.await"; params?: never }
+  | { method: "runtime.stop"; params?: never }
   // --- navigation -------------------------------------------------------------
   /**
    * Answers a `back` event. The token identifies which press is being answered,
@@ -51,6 +59,12 @@ export type BridgeRequest =
 
 export type BridgeMethod = BridgeRequest["method"]
 
+/** The states the on-device runtime reports. Mirrors RuntimeState in Kotlin. */
+export type RuntimeStateName = "stopped" | "starting" | "ready" | "degraded" | "failed" | "stopping"
+
+/** What `runtime.await` resolves to. The same shape upstream calls ServerReadyData. */
+export type RuntimeHandle = { url: string; username?: string; password?: string }
+
 /** Events the host pushes without being asked. */
 export type BridgeEvent =
   | { event: "notification.clicked"; tag: string }
@@ -62,6 +76,11 @@ export type BridgeEvent =
    * `back.handled` - promptly, since the host exits the app if it does not.
    */
   | { event: "back"; token: number }
+  /**
+   * The on-device runtime changed state. Carries the state name only - never the
+   * server password, which exists to be handed to the client and nowhere else.
+   */
+  | { event: "runtime.state"; state: RuntimeStateName; reason?: string }
 
 export type BridgeEventName = BridgeEvent["event"]
 

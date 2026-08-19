@@ -12,7 +12,7 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 | Layer | Status |
 |---|---|
 | Android JVM unit tests | ✅ **82 tests**, run in CI by `testDebugUnitTest` |
-| Android instrumented tests | ✅ **15 tests, RUN AND PASSING on a OnePlus 15** (M5/M6) — locally, not in CI |
+| Android instrumented tests | ✅ **17 tests, RUN AND PASSING on a OnePlus 15** (M5–M7) — locally, not in CI |
 | Renderer tests | ✅ **97 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
 | Device verification | ✅ **the app runs, connects and streams** — see `docs/CURRENT_STATUS.md` |
 | Cross-language contract | ✅ TS ↔ Kotlin bridge method lists compared mechanically |
@@ -87,6 +87,12 @@ Fast, no device. Run by `./gradlew test`.
 | Back | **Stale and superseded replies are discarded** | M4 | ✅ |
 | Back | **An unsolicited `back.handled` cannot exit the app** | M4 | ✅ |
 | Back | No renderer ⇒ exit immediately rather than waiting out the timeout | M4 | ✅ |
+| Runtime | Starting twice starts one server; concurrent callers join one start | M7 | ✅ |
+| Runtime | **A failed start does not cancel the Activity's scope** (supervisor) | M7 | ✅ |
+| Runtime | A failure is not cached — the next call retries | M7 | ✅ |
+| Runtime | Each launch gets its own password; the handle is loopback | M7 | ✅ |
+| Runtime | The config binds loopback and allows the WebView origin | M7 | ✅ |
+| Runtime | State names are stable, distinct, and never carry the password | M7 | ✅ |
 | Crypto | Value round-trips; empty, unicode and 200 KB values | M5 | ✅ |
 | Crypto | **The stored form does not contain the plaintext** | M5 | ✅ |
 | Crypto | A fresh IV per operation, so equal values differ on disk | M5 | ✅ |
@@ -121,6 +127,10 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Runtime | The app can bind a loopback port | M6 | ✅ **passed on device** |
 | Runtime | The app can read and write its own storage | M6 | ✅ **passed on device** |
 | Runtime | The app is not running as root | M6 | ✅ **passed on device** |
+| Runtime | **The runtime starts, serves and stops** | M7 | ✅ **passed on device** |
+| Runtime | **An unauthenticated request to the local server is refused (401)** | M7 | ✅ **passed on device** |
+| Runtime | The server is on loopback, and gone after stop | M7 | ✅ **passed on device** |
+| Runtime | Starting twice reuses the same server | M7 | ✅ **passed on device** |
 | App launch | Activity starts without crashing | M2 | ✅ **passed on device** |
 | App identity | `packageName` is `ai.opencode.android` | M2 | ✅ **passed on device** |
 | WebView | Security settings locked down (file access off both forms) | M2 | ✅ **passed on device** |

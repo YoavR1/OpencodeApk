@@ -15,7 +15,7 @@ import { MemoryRouter, createMemoryHistory, type BaseRouterProps } from "@solidj
 import { Show, createResource, onCleanup } from "solid-js"
 import { render } from "solid-js/web"
 import { createBackDispatcher, createHistoryDepth, dismissTopDialog, type BackDispatcher } from "./back"
-import { createBridge, type Bridge } from "./bridge"
+import { createBridge, type Bridge, type RuntimeHandle } from "./bridge"
 import { createAndroidDraftStore } from "./drafts"
 import { revealFocusedInput } from "./focus"
 import { createAndroidPlatform, readHostInfo } from "./platform"
@@ -252,10 +252,31 @@ function AndroidRoot(props: { bridge: Bridge }) {
   onCleanup(answerBack(props.bridge, back))
 
   /**
-   * The configured server, or null on a fresh install.
+   * The on-device server, if this build has one and it starts.
    *
-   * `AppInterface` cannot be rendered without one - see setup.tsx - so this
-   * gates it rather than merely choosing a default.
+   * Asked for first, and unconditionally: the whole point of the project is that
+   * the app needs no external server. A failure here is not fatal - the app falls
+   * back to asking for a remote one - but it is the path that should normally win.
+   */
+  const [local] = createResource(async (): Promise<RuntimeHandle | null> => {
+    try {
+      return await props.bridge.request<RuntimeHandle>({ method: "runtime.await" })
+    } catch (error) {
+      // Either this build has no runtime packaged, or it could not start.
+      // Neither should stop the app from opening - but the reason has to reach
+      // somewhere visible, because on some devices the host's own logs never
+      // make it to logcat and silence here looks identical to "not built in".
+      console.warn("[opencode] no on-device runtime:", (error as Error)?.message ?? error)
+      return null
+    }
+  })
+
+  /**
+   * The remote server the user configured, or null.
+   *
+   * Only consulted when there is no local runtime. `AppInterface` cannot be
+   * rendered without a server at all - see setup.tsx - so one of the two has to
+   * produce one.
    */
   const [storedServer, { mutate: setStoredServer }] = createResource(async () => {
     try {
@@ -289,12 +310,30 @@ function AndroidRoot(props: { bridge: Bridge }) {
   return (
     <PlatformProvider value={platform}>
       <AppBaseProviders locale={locale.latest}>
-        <Show when={!locale.loading && !storedServer.loading} fallback={<LoadingSplash />}>
-          <Show when={storedServer.latest} fallback={<AndroidServerSetup onConnected={saveServer} />}>
-            {(server) => (
+        <Show when={!locale.loading && !local.loading && !storedServer.loading} fallback={<LoadingSplash />}>
+          <Show
+            when={local.latest}
+            fallback={
+              <Show when={storedServer.latest} fallback={<AndroidServerSetup onConnected={saveServer} />}>
+                {(server) => (
+                  <AppInterface
+                    defaultServer={ServerConnection.Key.make(storedServerKey(server()))}
+                    servers={[{ type: "http", http: { ...server() } }]}
+                    router={(routerProps) => <AndroidRouter {...routerProps} back={back} />}
+                    serverScoped={<AndroidBackHandlers back={back} />}
+                  />
+                )}
+              </Show>
+            }
+          >
+            {(handle) => (
               <AppInterface
-                defaultServer={ServerConnection.Key.make(storedServerKey(server()))}
-                servers={[{ type: "http", http: { ...server() } }]}
+                // A sidecar connection, exactly as desktop builds for its own
+                // local server. Upstream's `ServerConnection.local()` recognises
+                // this shape, and the client factories attach the Basic auth -
+                // no second code path, which is the whole point of A3.
+                defaultServer={ServerConnection.Key.make("sidecar")}
+                servers={[{ type: "sidecar", variant: "base", http: { ...handle() } }]}
                 router={(routerProps) => <AndroidRouter {...routerProps} back={back} />}
                 serverScoped={<AndroidBackHandlers back={back} />}
               />

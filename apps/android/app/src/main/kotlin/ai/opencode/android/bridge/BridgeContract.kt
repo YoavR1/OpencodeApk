@@ -20,6 +20,7 @@ object BridgeContract {
         "clipboard.readText", "clipboard.writeText", "clipboard.readImage",
         "share", "openExternal", "pickDirectory", "notify", "restart",
         "back.handled",
+        "runtime.await", "runtime.stop",
         "host.info", "defaultServer.get", "defaultServer.set",
     )
 

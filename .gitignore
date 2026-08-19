@@ -66,3 +66,7 @@ spike/m6/staging/
 
 # M6 spike: exec fixture copied off a device (spike/m6/provision-exec-fixture.sh)
 apps/android/app/src/debug/jniLibs/
+
+# M7: on-device runtime, prepared by scripts/runtime/prepare-android-runtime.py
+apps/android/app/src/main/jniLibs/
+apps/android/app/src/main/assets/runtime/

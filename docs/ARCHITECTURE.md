@@ -809,6 +809,32 @@ Divergence **D7** adds the origin, in the same pattern upstream already uses for
 Electron's `oc://renderer`. The consequence is that **M5 needs a server built
 from this repository** until that lands upstream. See ADR-0019.
 
+### The on-device runtime (M7, running)
+
+```
+MainActivity
+  └── LocalRuntimeController          one server per process, race-safe, supervised
+        └── EmbeddedProcessRuntime    ProcessBuilder on libnode.so
+              ├── RuntimeAssets       assets/runtime -> filesDir, re-copied per APK
+              └── launch.mjs          Server.listen({port:0, hostname, cors}), one JSON line per event
+```
+
+| Piece | Where |
+|---|---|
+| Node binary + 10 libraries | `jniLibs/arm64-v8a/`, renamed for Android and reference-patched |
+| Server bundle, WASM, launcher | `assets/runtime/`, copied to `filesDir` on first launch |
+| Prepared by | `scripts/runtime/prepare-android-runtime.py` (not committed) |
+
+The handle it produces becomes a `sidecar`-shaped `ServerConnection` — exactly
+what desktop builds for its own server — so nothing below the connection changes.
+`ADR-0023` records why each packaging decision is what it is.
+
+**States**, reported to the renderer over the bridge as `runtime.state`:
+`stopped → starting → ready`, with `degraded` when a running server stops
+answering health checks and `failed` when it never started or has exited.
+`degraded` is deliberately distinct from `failed`: one is recoverable and the
+other is not, and the UI should not show one message for both.
+
 ### Reachability — the constraint that shapes both modes
 
 The app is served from `https://appassets.androidplatform.net`, which makes it a

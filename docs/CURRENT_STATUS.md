@@ -7,15 +7,48 @@
 | | |
 |---|---|
 | **Last updated** | 2026-08-19 |
-| **Session** | M6 local runtime feasibility spike |
+| **Session** | M7 local runtime integration |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M6 — complete. The OpenCode server runs on the phone.** |
-| **Next milestone** | **M7 — local runtime integration** |
-| **Next prompt** | **`prompts/07_LOCAL_RUNTIME_INTEGRATION.md`** |
+| **Current milestone** | **M7 — the app starts its own server. No PC, no external server.** |
+| **Next milestone** | **M8 — files, terminal, Git** |
+| **Next prompt** | **`prompts/08_TERMINAL_FILES_GIT.md`** |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
 > needs no external server. This is not project completion.
+
+---
+
+## M7: the app is standalone
+
+Install the APK, open it, and the OpenCode UI comes up against a server the app
+started itself. No PC, no `adb reverse`, no external server, no Termux.
+
+Verified on the OnePlus 15 from a clean install (`pm clear`):
+
+| Claim | Evidence |
+|---|---|
+| The app starts its own server | `ps`: `libnode.so` pid 2282, **parent 27279 = the app**, uid `u0_a599` |
+| It is reachable and the UI uses it | the shared UI renders connected, hitting `http://127.0.0.1:4096` |
+| Auth is enforced on loopback | unauthenticated `curl` → **HTTP 401** |
+| State survives | `files/opencode/` persists across restarts |
+| Start/serve/stop | instrumented smoke test, **17 tests pass on the device** |
+| APK | **63.7 MB** compressed (97.3 MB native + 37.5 MB assets uncompressed) |
+
+**Two defects caught before the device saw them**, both by unit tests:
+
+- A failed start propagated out of `async` and would have cancelled
+  `lifecycleScope` - taking the bridge and the UI down with a recoverable
+  runtime failure. Runtime work now runs under a supervisor.
+- A cached failure would have required an app restart before the runtime would
+  try again. It now retries.
+
+**What is not done.** The runtime is owned by the Activity, so Android may kill it
+when the app is backgrounded — a foreground service is M9, and until then a long
+agent turn is not protected. Terminals are still unavailable (M8). And no agent
+turn has been run end to end, because that needs a provider credential.
+
+Packaging, environment and lifecycle decisions are recorded in **ADR-0023**.
 
 ---
 
@@ -197,6 +230,11 @@ meant four defects away from functioning. That distinction is already in
 
 ## Recommended next session
 
-**M7 — `prompts/07_LOCAL_RUNTIME_INTEGRATION.md`**, which is where the
+**M8 — `prompts/08_TERMINAL_FILES_GIT.md`.** The one native gap left is PTY:
+`@lydell/node-pty` has no Android arm64 build, and the bundle imports it
+statically, so a shim satisfies the import and throws if a terminal is opened.
+Building it with the NDK is M8's first job.
+
+*(Superseded plan for M7, kept for context: this is where the*
 runtime gets packaged into the APK as `lib*.so`, started from a foreground
 service, and pointed at by the same `ServerConnection` the app already uses.

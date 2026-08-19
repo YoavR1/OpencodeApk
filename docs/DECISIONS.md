@@ -907,6 +907,75 @@ compiling Node rather than redistributing an artifact.
 
 ---
 
+## ADR-0023 — How the runtime is packaged and started
+
+**Status.** Accepted (M7), running on a device.
+
+**Context.** ADR-0022 chose an on-device Node process. This records the packaging
+and lifecycle decisions that followed, each forced by something measured.
+
+**Decisions.**
+
+**The runtime ships in the APK, not downloaded.** W^X (measured in M6) forbids
+executing a file the app can write, so the binary is a `lib*.so` in `jniLibs` and
+runs from `nativeLibraryDir`. `useLegacyPackaging = true` is required, or the
+libraries are mapped from the APK and that directory is empty.
+
+**Versioned libraries are renamed and their references patched.** Android extracts
+only `lib*.so`, so `libicuuc.so.78` becomes `libicuuc78.so` and every `DT_NEEDED`
+and `DT_SONAME` pointing at it is rewritten (`scripts/runtime/elfpatch.py`). Every
+rename is shorter than the original, so the strings are patched in place - and the
+patcher refuses rather than guesses when another string points into the bytes it
+would overwrite.
+
+**The server bundle lives in assets, not jniLibs.** It is data that Node reads,
+not code the app executes, so W^X does not apply. It is copied to `filesDir` on
+first launch and re-copied only when the APK changes, keyed on a digest of the
+asset listing plus the version name - a 37 MB copy on every start would be a
+visible delay for nothing.
+
+**The runtime is prepared by a script, not committed.** 135 MB of third-party
+build output does not belong in git. `scripts/runtime/prepare-android-runtime.py`
+assembles it, and a build without it is legitimate: the Gradle `reportRuntime`
+task says which kind of APK is being produced, `runtime.await` fails honestly, and
+the UI falls back to asking for a remote server. Failing the build would break CI
+and anyone cloning the repository, to no benefit.
+
+**Everything the runtime needs is set explicitly.** `LD_LIBRARY_PATH` for the
+renamed libraries, `OPENCODE_SERVER_PASSWORD`/`USERNAME` for auth, `HOME`,
+`TMPDIR` and the `XDG_*` directories inside app-private storage, and `SHELL`
+pointed at Android's. Each of these was a separate failure during M6 and each is
+an artifact of reusing a build compiled for a different prefix.
+
+**Loopback and auth, always.** The server binds `127.0.0.1` with a password
+generated per launch, held in memory, never persisted - the desktop sidecar's rule
+(ADR-0006). Other apps share loopback, so the password is not optional. Verified
+on the device: an unauthenticated request gets **401**.
+
+**Port is left to upstream.** `--port=0` means "you choose", and upstream tries
+4096 then falls back to any free port. Predictable, but survives a collision.
+
+**Consequences.**
+
+- **Runtime work runs under a supervisor.** A failed start propagating out of
+  `async` would cancel `lifecycleScope` and take the bridge and the UI with it. A
+  unit test caught this before a device could.
+- **A start failure is not cached.** A transient failure must not require an app
+  restart before the runtime will try again.
+- **Start is idempotent and race-safe.** The renderer asks on load and again on
+  reload; a second start would orphan a process holding the port and a second copy
+  of the database.
+- **The UI cannot tell local from remote.** The handle becomes a `sidecar`-shaped
+  `ServerConnection`, exactly as desktop builds for its own server, so the client
+  factories and the whole request path are unchanged (A3).
+- **Terminals remain unavailable.** The PTY shim satisfies the bundle's static
+  import and throws if a terminal is actually opened. M8.
+- **This is not yet lifecycle-safe.** The runtime is owned by the Activity, so
+  Android may kill it when the app is backgrounded. A foreground service is M9,
+  and until then a long agent turn is not protected.
+
+---
+
 ## Open questions (not yet ADRs)
 
 | # | Question | Decide at |

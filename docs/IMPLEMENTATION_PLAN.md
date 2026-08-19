@@ -15,7 +15,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **complete — mobile layout, IME and notifications verified on a device in M5** |
 | M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **working on hardware; LAN-over-HTTP impossible (ADR-0021)** |
 | M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | **complete — the server runs on the phone** |
-| M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | not started |
+| M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | **the app starts its own server on device** |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | not started |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | not started |
 | M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | not started |
@@ -273,13 +273,17 @@ the project real.
 7. Complete a full agent turn with no external server.
 
 **Exit criteria**
-- [ ] Server starts on-device on `arm64-v8a` (log evidence).
-- [ ] Binds `127.0.0.1` with auth enabled (verified).
-- [ ] The UI connects through the **same** `ServerConnection` path as M5.
-- [ ] A full agent turn completes with **no external server**.
-- [ ] Server survives app backgrounding.
-- [ ] Data persists across app restart.
-- [ ] `CURRENT_STATUS.md` updated.
+- [x] Server starts on-device on `arm64-v8a` — `libnode.so` running as a child of
+      the app process, from a clean install.
+- [x] Binds `127.0.0.1` with auth enabled — unauthenticated request returns 401.
+- [x] The UI connects through the **same** `ServerConnection` path as M5 — a
+      `sidecar`-shaped value, as desktop builds for its own server.
+- [ ] A full agent turn completes with **no external server**. *Needs a provider
+      credential; not run.*
+- [ ] Server survives app backgrounding. *The runtime is owned by the Activity;
+      the foreground service is M9.*
+- [x] Data persists across app restart — `files/opencode/`.
+- [x] `CURRENT_STATUS.md` updated.
 
 ---
 

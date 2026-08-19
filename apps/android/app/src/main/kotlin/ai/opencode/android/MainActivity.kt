@@ -12,8 +12,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import ai.opencode.android.bridge.BridgeHost
 import ai.opencode.android.platform.Notifications
+import ai.opencode.android.runtime.LocalRuntimeController
 import ai.opencode.android.util.SafeLog
 import ai.opencode.android.web.BridgePort
 import ai.opencode.android.web.WebOrigin
@@ -31,6 +33,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var bridgePort: BridgePort
     private lateinit var bridgeHost: BridgeHost
+    private lateinit var runtime: LocalRuntimeController
     private var backCallback: OnBackPressedCallback? = null
 
     private val back = BackCoordinator(
@@ -59,12 +62,33 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.web_view)
 
         bridgePort = BridgePort(webView) { message -> bridgeHost.handle(message) }
+        runtime = LocalRuntimeController(
+            context = this,
+            scope = lifecycleScope,
+            versionName = BuildConfig.VERSION_NAME,
+        )
         bridgeHost = BridgeHost(
             activity = this,
             scope = lifecycleScope,
             send = bridgePort::send,
             onBackHandled = back::handled,
+            runtime = runtime,
         )
+
+        // The renderer is told about state changes rather than having to poll:
+        // a runtime that dies mid-session should surface immediately, not on the
+        // next request that happens to fail.
+        lifecycleScope.launch {
+            runtime.state.collect { current ->
+                if (!bridgePort.connected) return@collect
+                val reason = when (current) {
+                    is ai.opencode.android.runtime.RuntimeState.Failed -> current.reason
+                    is ai.opencode.android.runtime.RuntimeState.Degraded -> current.reason
+                    else -> null
+                }
+                bridgeHost.emitRuntimeState(current.name, reason)
+            }
+        }
 
         WebViewHost.configure(
             webView = webView,
