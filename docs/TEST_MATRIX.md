@@ -7,24 +7,26 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 
 ---
 
-## Current state (M4)
+## Current state (M5)
 
 | Layer | Status |
 |---|---|
-| Android JVM unit tests | ✅ **60 tests**, run in CI by `testDebugUnitTest` |
-| Android instrumented tests | ⚠️ 4 written, **not run** — no emulator job yet |
-| Renderer tests | ✅ **72 tests** across 5 files, run in CI by `bun test --cwd packages/android` |
-| Cross-language contract | ✅ TS ↔ Kotlin method lists compared mechanically |
+| Android JVM unit tests | ✅ **82 tests**, run in CI by `testDebugUnitTest` |
+| Android instrumented tests | ⚠️ 9 written, **not run** — no emulator job yet |
+| Renderer tests | ✅ **87 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
+| Cross-language contract | ✅ TS ↔ Kotlin bridge method lists compared mechanically |
+| Upstream divergence guard | ✅ **new in M5** — every entry in `UPSTREAM_SYNC.md` fails a test if a merge drops it |
 | Shared UI build | ✅ upstream vendored; `build-shared-ui.sh` gates the APK |
 | Integration tests | ⬜ |
 | Manual device verification | ⬜ awaiting a device report |
 
-**What no test here covers: the UI itself.** Every renderer test in this file
-exercises adapter and protocol logic. Nothing renders a component, because the
-shared UI cannot be built in this environment (`bun install` is blocked by the
-proxy — see `docs/CURRENT_STATUS.md`), so no narrow-viewport or on-device layout
-assertion exists yet. The mobile-layout claims in ADR-0016 are reasoned from
-upstream's source, not observed. CI builds the bundle; a device confirms it.
+**What no test here covers: the UI itself, and the network.** Every renderer test
+in this file exercises adapter, protocol or configuration logic. Nothing renders
+a component and nothing makes a request, because the shared UI cannot be built in
+this environment (`bun install` is blocked by the proxy — see
+`docs/CURRENT_STATUS.md`). So the M4 layout claims and the whole of M5's
+end-to-end path are reasoned from source, not observed. CI builds the bundle; a
+device with a real server confirms the rest.
 
 **On the instrumented tests.** They are written and committed but no CI job runs
 them, so they are ⚠️ rather than ✅. An emulator job is deliberately deferred:
@@ -76,6 +78,19 @@ Fast, no device. Run by `./gradlew test`.
 | Back | **Stale and superseded replies are discarded** | M4 | ✅ |
 | Back | **An unsolicited `back.handled` cannot exit the app** | M4 | ✅ |
 | Back | No renderer ⇒ exit immediately rather than waiting out the timeout | M4 | ✅ |
+| Crypto | Value round-trips; empty, unicode and 200 KB values | M5 | ✅ |
+| Crypto | **The stored form does not contain the plaintext** | M5 | ✅ |
+| Crypto | A fresh IV per operation, so equal values differ on disk | M5 | ✅ |
+| Crypto | **Tampered ciphertext, tampered IV and truncated records are refused** | M5 | ✅ |
+| Crypto | An unknown scheme version is refused rather than misread | M5 | ✅ |
+| Crypto | A nonsense IV length is rejected before reaching the cipher | M5 | ✅ |
+| Crypto | **Plaintext written before M5 reads as absent, not a crash** | M5 | ✅ |
+| Crypto | Another key cannot read the value; the same key can | M5 | ✅ |
+| Storage | **Values are unreadable in the raw SharedPreferences file** | M5 | ✅ |
+| Storage | Key names stay readable so listing still works | M5 | ✅ |
+| Network policy | **The release config denies cleartext**, and only debug permits it | M5 | ✅ |
+| Network policy | Cleartext is permitted to loopback and nothing else | M5 | ✅ |
+| Network policy | **Neither config installs a trust anchor** (TLS verification intact) | M5 | ✅ |
 | Server connection | Local `ServerConnection` value construction | M7 | ⬜ |
 | Server connection | Basic-auth header construction | M5 | ⬜ |
 | Credential store | Store/retrieve/delete round-trip | M10 | ⬜ |
@@ -88,6 +103,9 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 
 | Area | Test | Milestone | Status |
 |---|---|---|---|
+| Keystore | The key is really in `AndroidKeyStore` | M5 | ⚠️ written, no emulator job |
+| Keystore | **The key material cannot be exported** | M5 | ⚠️ written, no emulator job |
+| Keystore | A value survives a new cipher instance; another alias cannot read it | M5 | ⚠️ written, no emulator job |
 | App launch | Activity starts without crashing | M2 | ⚠️ written, no emulator job |
 | App identity | `packageName` is `ai.opencode.android` | M2 | ⚠️ written, no emulator job |
 | WebView | Security settings locked down (file access off both forms) | M2 | ⚠️ written, no emulator job |
@@ -99,6 +117,11 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Input | Soft keyboard insets do not occlude input | M4 | ⬜ |
 | Layout | Mobile breakpoint activates at a phone viewport | M4 | ⬜ **the main unverified M4 claim** |
 | Layout | Hover-revealed controls are visible on touch | M4 | ⬜ |
+| Remote server | Session listing against a real server | M5 | ⬜ **device + server only** |
+| Remote server | Session creation, prompt send, streamed reply | M5 | ⬜ **device + server only** |
+| Remote server | SSE over `fetch` survives WebView (**Q9**) | M5 | ⬜ **the main open question** |
+| Remote server | Wrong credentials, unreachable host, offline, mid-turn drop | M5 | ⬜ |
+| Remote server | Reconnect after the server returns | M5 | ⬜ |
 | Local server | Server starts and answers a health check | M7 | ⬜ |
 | Local server | Binds `127.0.0.1` only — external bind refused | M7/M10 | ⬜ |
 | Local server | Unauthenticated request is rejected | M10 | ⬜ |
@@ -149,6 +172,14 @@ Run per-package. **Never** via the root `test` script.
 | Focus | Checkboxes, buttons, ranges and `contenteditable=false` do not | M4 | ✅ |
 | Focus | Focused field is scrolled with `block: "nearest"` | M4 | ✅ |
 | Focus | An element that cannot scroll does not throw | M4 | ✅ |
+| Startup server | **The key is never empty** — an empty one gates off the whole app | M5 | ✅ |
+| Startup server | A stored key is used; blank/missing falls back to the sentinel | M5 | ✅ |
+| Startup server | The sentinel cannot be mistaken for a real server key | M5 | ✅ |
+| Divergence | **D1/D2** — the `Platform` union still knows about Android | M5 | ✅ |
+| Divergence | **D3** — storage is chosen by capability at both call sites | M5 | ✅ |
+| Divergence | **D6** — the Android titlebar default survives | M5 | ✅ |
+| Divergence | **D7** — the server still accepts the WebView origin, exactly | M5 | ✅ |
+| Divergence | The allowlisted origin matches the one Kotlin serves from | M5 | ✅ |
 
 ### Upstream's own tests
 

@@ -7,7 +7,12 @@
   app will ever need, and it is scoped here rather than by setting
   android:usesCleartextTraffic="true", which would allow cleartext to any host.
 
-  See .claude/rules/android.md N5 and ADR-0006.
+  Debug builds replace this file entirely with src/debug/res/xml/, which also
+  permits cleartext to the LAN so a self-hosted OpenCode server can be reached
+  over plain HTTP while testing. That relaxation never reaches a release APK,
+  and NetworkSecurityConfigTest pins this file's contents so it cannot drift.
+
+  See .claude/rules/android.md N5, ADR-0006 and ADR-0018.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />

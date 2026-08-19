@@ -1,9 +1,12 @@
 package ai.opencode.android.platform
 
 import android.content.Context
+import ai.opencode.android.security.testCipher
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -12,6 +15,10 @@ import org.robolectric.RobolectricTestRunner
 /**
  * Store names arrive from web content, so the mapping from name to preferences
  * file is a boundary, not an implementation detail.
+ *
+ * The cipher is a real AES-GCM one over an in-memory key rather than a stub, so
+ * these exercise the same path production uses; only the key source differs,
+ * because `AndroidKeyStore` does not exist off-device.
  */
 @RunWith(RobolectricTestRunner::class)
 class PreferenceStoreTest {
@@ -20,13 +27,49 @@ class PreferenceStoreTest {
 
     @Before
     fun setUp() {
-        store = PreferenceStore(ApplicationProvider.getApplicationContext<Context>())
+        store = PreferenceStore(ApplicationProvider.getApplicationContext<Context>(), testCipher())
     }
 
     @Test
     fun `values round trip`() {
         store.set("default.dat", "theme", "dark")
         assertEquals("dark", store.get("default.dat", "theme"))
+    }
+
+    @Test
+    fun `stored values are not readable on disk`() {
+        // The property M5 actually needs. Upstream persists a whole
+        // ServerConnection - password included - into this store, so leaving it
+        // as plain SharedPreferences would put a credential in the clear.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        store.set("server.v3", "state", """{"password":"hunter2"}""")
+
+        val onDisk = context.getSharedPreferences("oc_server.v3", Context.MODE_PRIVATE)
+            .all.values.joinToString(" ") { it.toString() }
+
+        assertFalse("the password must not be readable", onDisk.contains("hunter2"))
+        assertFalse("nor the surrounding document", onDisk.contains("password"))
+        // ...and it is genuinely still retrievable through the store.
+        assertEquals("""{"password":"hunter2"}""", store.get("server.v3", "state"))
+    }
+
+    @Test
+    fun `key names stay readable so listing still works`() {
+        // Deliberate: names are structural, values carry the content.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        store.set("s", "a-known-name", "value")
+        assertTrue(context.getSharedPreferences("oc_s", Context.MODE_PRIVATE).all.keys.contains("a-known-name"))
+    }
+
+    @Test
+    fun `a value written before encryption reads as absent rather than crashing`() {
+        // The M4-to-M5 upgrade path on a device that already holds data.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("oc_legacy", Context.MODE_PRIVATE)
+            .edit()
+            .putString("key", "written in the clear by M4")
+            .commit()
+        assertNull(store.get("legacy", "key"))
     }
 
     @Test

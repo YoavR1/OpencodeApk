@@ -754,12 +754,69 @@ Consequences that bind M6 and M7:
 
 ## 2.6 Connection modes — one abstraction, three fillings
 
-| Mode | Milestone | `ServerConnection` value | `ServerConnection.local()` |
-|---|---|---|---|
-| Remote | M5 | `{ type: "http", http: { url, username, password } }` | false (unless the URL is loopback) |
-| On-device | M7 | `{ type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:<port>", username: "opencode", password } }` | **true**, via `builtin()` |
+Local and remote differ by **value**, never by code path. Everything is a
+`ServerConnection` handed to upstream's own client factories in
+`packages/app/src/utils/server.ts`, which attach HTTP Basic auth from
+`username`/`password`.
 
-Switching modes changes a value produced by `RuntimeHandle`. It changes no code path.
+| Mode | Value | Milestone |
+|---|---|---|
+| Remote server | `{ type: "http", http: { url, username?, password? } }` | **M5** |
+| On-device server | `{ type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:<port>", username: "opencode", password } }` | M7 |
+| SSH | desktop-only; not planned for Android | — |
+
+This project writes **no HTTP client, no base-URL resolver and no fetch path**.
+M7 reuses M5's code exactly, with a different value.
+
+### Which server the app starts on
+
+`ServerProvider` renders nothing until `ready() && !!state.active`. The active
+key starts as the `defaultServer` prop, so **an empty key gates off the whole
+application** — no UI, and therefore no way to reach the dialog that would fix
+it. M3 and M4 passed `Key.make("")` and shipped exactly that; M5 found it.
+
+Desktop never hits this because it always has a sidecar to fall back on, and web
+because it is served *by* the server it talks to. Android in remote mode is the
+first case with genuinely no server until the user adds one, so it needs a
+non-empty stand-in: `packages/android/src/server.ts` resolves the persisted
+default and falls back to `android:no-server-selected`.
+
+Nothing matches that sentinel, so upstream's `current()` memo falls through to
+`allServers()[0]` — a returning user with a stored server lands on it without
+having had to mark anything as default.
+
+### What upstream already provides, and this project does not rebuild
+
+Inspecting before building changed the size of this milestone considerably:
+
+| Need | Upstream mechanism |
+|---|---|
+| Add/edit a server: URL, name, username, password | `components/dialog-select-server.tsx` |
+| Health/status, with a live preview while typing | `utils/server-health.ts`, `ServerHealthIndicator` |
+| Connect / disconnect | `ServerProvider.add` / `.remove` |
+| Persisted server list | `Persist.global("server", ["server.v3"])` |
+| "Unreachable" state with retry and server switching | `ConnectionGate` → `ConnectionError` |
+| Default-server persistence | `Platform.getDefaultServer` / `setDefaultServer` |
+
+### CORS — the thing that makes or breaks remote mode
+
+The app's origin is `https://appassets.androidplatform.net` and every request
+carries `Authorization`, which is not CORS-safelisted — so **every request is
+preflighted**. Upstream's allowlist did not include the origin, and
+`opencode serve` has no `--cors` flag, so a stock server refuses all of them.
+
+Divergence **D7** adds the origin, in the same pattern upstream already uses for
+Electron's `oc://renderer`. The consequence is that **M5 needs a server built
+from this repository** until that lands upstream. See ADR-0019.
+
+### Streaming
+
+Session events arrive over `fetch` + `response.body.getReader()`, not
+`EventSource` — verified again in M5 by grepping `packages/app`, `packages/client`
+and `packages/sdk` for `EventSource` and finding none. This matters because
+`EventSource` cannot set an `Authorization` header, and Basic auth is how both
+modes authenticate. Whether WebView's streaming holds up in practice is **Q9**,
+and answering it is one of the reasons M5 exists.
 
 ## 2.7 WebView configuration
 
@@ -777,11 +834,21 @@ Switching modes changes a value produced by `RuntimeHandle`. It changes no code 
 
 ## 2.8 Security posture
 
-Unchanged from M0 and now grounded in the verified desktop behaviour: loopback
-bind, per-launch `randomUUID()`-equivalent password held in memory only, Basic
-auth enforced even on loopback (other Android apps can reach loopback ports),
-Keystore-backed provider credentials, minimal validated bridge surface, SAF for
-project folders, no root, no broad storage permission.
+Grounded in the verified desktop behaviour: loopback bind, per-launch
+`randomUUID()`-equivalent password held in memory only, Basic auth enforced even
+on loopback (other Android apps can reach loopback ports), minimal validated
+bridge surface, SAF for project folders, no root, no broad storage permission.
+
+**What M5 changed.**
+
+| | |
+|---|---|
+| Data at rest | Every value in the preference-backed stores is AES-256-GCM encrypted under a **non-exportable Android Keystore key** (ADR-0017). Key *names* stay readable; draft *blob files* do not (M10). |
+| Unreadable values | Read as **absent**, never as an error — that is what makes the M4→M5 upgrade survivable. Unwritable values **fail loudly**; there is no plaintext fallback. |
+| Cleartext HTTP | Permitted in **debug builds only**, via a build-type source set, so a self-hosted LAN server can be reached (ADR-0018). Release denies it everywhere but loopback, and `NetworkSecurityConfigTest` pins that. |
+| TLS verification | **Untouched.** No custom trust anchors, no `debug-overrides`, no hostname verifier, in either build type — asserted by test. |
+| Credentials in logs | `SafeLog` redacts `Authorization` header values, `password=`/`token`/`secret`/`apikey` forms, and Basic credentials embedded in URLs. The decrypt path logs the **exception type only**, never the message, because some providers include a prefix of the input in it. |
+| New permissions | `INTERNET` and `ACCESS_NETWORK_STATE`, each justified in the manifest. `verify-apk.sh` now asserts `INTERNET` is actually present, since its absence would surface only as opaque network errors on a device. |
 
 ---
 

@@ -47,6 +47,13 @@ android.permission.CAMERA
 android.permission.READ_PHONE_STATE
 "
 
+# Permissions the app cannot work without. A missing one fails silently at
+# runtime - INTERNET in particular turns every server request into an opaque
+# network error - so its absence is a build failure, not a surprise on a phone.
+REQUIRED_PERMISSIONS="
+android.permission.INTERNET
+"
+
 head2 "verify-apk"
 
 APK="${1:-}"
@@ -183,6 +190,14 @@ else
     fi
   done
   [ "$FOUND" -eq 0 ] && good "no forbidden permission found"
+
+  for perm in $REQUIRED_PERMISSIONS; do
+    if grep -qF "$perm" <<< "$PERMS"; then
+      good "required permission present: $perm"
+    else
+      bad "required permission missing: $perm"
+    fi
+  done
 fi
 
 head2 "result"

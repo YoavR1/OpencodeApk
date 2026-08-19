@@ -14,9 +14,24 @@
         REQUEST_INSTALL_PACKAGES - the app never installs anything
 
       Expected additions:
-        INTERNET          - M5, for provider API calls through the OpenCode server
         FOREGROUND_SERVICE- M7, to keep an agent turn alive while backgrounded
     -->
+
+    <!--
+      INTERNET (M5): reaching the OpenCode server the user configures, and
+      through it the AI providers.
+
+      Note that this is NOT needed for the M7 end state on its own - a server on
+      loopback is reachable without it - but the providers the server talks to
+      are remote, and in M5 the server itself is.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      ACCESS_NETWORK_STATE (M5): lets the app tell "you are offline" apart from
+      "that server is down", so a connection failure can say which it was.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
       POST_NOTIFICATIONS (M4): backs Platform.notify, which the shared UI uses to

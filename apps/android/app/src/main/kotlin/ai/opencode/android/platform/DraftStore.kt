@@ -2,6 +2,8 @@ package ai.opencode.android.platform
 
 import android.content.Context
 import android.util.Base64
+import ai.opencode.android.security.KeystoreCipher
+import ai.opencode.android.security.ValueCipher
 import java.io.File
 import java.security.MessageDigest
 
@@ -13,12 +15,19 @@ import java.security.MessageDigest
  * a half-written prompt because the user took a phone call is exactly the kind
  * of thing that makes an app feel untrustworthy (.claude/rules/android.md N7).
  *
- * Text lives in preferences; blobs are content-addressed files on disk, so the
- * same pasted image referenced from several drafts is stored once.
+ * Text lives in preferences and is encrypted with everything else there. Blobs
+ * are content-addressed files on disk, so the same pasted image referenced from
+ * several drafts is stored once.
+ *
+ * Blob *files* are not encrypted. They are app-private and the app sets
+ * `allowBackup="false"`, so reading them needs root or a physical extraction;
+ * encrypting them is a separate question about large binary payloads, deferred
+ * to M10 with the rest of the storage hardening. Draft *text* - the part that
+ * routinely contains code and pasted secrets - is encrypted.
  */
-class DraftStore(context: Context) {
+class DraftStore(context: Context, cipher: ValueCipher = KeystoreCipher()) {
 
-    private val prefs = PreferenceStore(context)
+    private val prefs = PreferenceStore(context, cipher)
     private val blobDir = File(context.filesDir, "drafts/blobs").apply { mkdirs() }
 
     fun get(key: String): String? = prefs.get(STORE, key)

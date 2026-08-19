@@ -76,8 +76,15 @@ so **upstream's root `package.json` needs no edit at all**.
 | D3 | `packages/app/src/utils/persist.ts` (lines 547, 579) | `platform.platform === "desktop" && !!platform.storage` → `!!platform.storage`, with the six reader occurrences renamed `isDesktop` → `hasNativeStorage` | M4 | `git diff` shows +12/−8 |
 | D5 | `.gitignore` | Upstream's verbatim + our section below a marked line | M3 | 0 upstream files newly ignored |
 | D6 | `packages/app/src/context/settings.tsx` (~line 424) | `mobileTitlebarPosition` default becomes `"bottom"` when `platform.platform === "android"` | M4 | `git diff` shows +3/−1 |
+| D7 | `packages/server/src/cors.ts` (~line 24) | Allow the Android WebView asset origin `https://appassets.androidplatform.net` | M5 | `git diff` shows +9/−0 (1 line of code, 8 of comment) |
 
-**Actual divergence in upstream source: 3 files, +17/−10 lines** (`platform.tsx` +2/−1, `persist.ts` +12/−8, `settings.tsx` +3/−1).
+**Actual divergence in upstream source: 4 files, +26/−10 lines** (`platform.tsx`
++2/−1, `persist.ts` +12/−8, `settings.tsx` +3/−1, `cors.ts` +9/−0).
+
+**Every one of these is guarded by a test.** `packages/android/src/divergence.test.ts`
+reads the upstream files and fails if a divergence is missing, because a merge
+that drops one produces no other symptom: the build stays green, the types still
+check, and the app breaks only on a phone. Run it first after any upstream bump.
 
 Two notes on the applied set:
 
@@ -88,6 +95,16 @@ Two notes on the applied set:
   where that is the right answer. There is no capability to test for "is held in
   one hand". It changes only a *default*; the setting remains the user's, and
   upstream already ships both positions.
+- **D7 is the one that blocks everything if lost, and the one with a caveat.**
+  Upstream's CORS allowlist already special-cases Electron (`oc://renderer`) and
+  Tauri; the Android WebView origin is the same category, so this is a mechanical
+  addition in an established pattern and worth proposing upstream.
+
+  The caveat is that it lives in the **server**, not the app. A user running a
+  released `opencode` binary does not have it, and their server will reject the
+  app's requests — `Authorization` makes every request preflighted, so a refused
+  preflight blocks all of them. Until this lands upstream, M5 requires a server
+  built from this repository. See ADR-0019.
 
 ---
 

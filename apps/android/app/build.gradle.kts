@@ -116,6 +116,20 @@ val syncSharedUi by tasks.registering(Sync::class) {
 
 tasks.named("preBuild") { dependsOn(syncSharedUi) }
 
+// NetworkSecurityConfigTest reads the network security XML off disk, because the
+// release and debug policies never coexist in one build for a runtime check to
+// compare. Gradle cannot see that dependency by itself, so without this the test
+// task stays UP-TO-DATE when the policy changes - which is precisely when it
+// needs to run. Verified by mutating the config and watching the test fail.
+tasks.withType<Test>().configureEach {
+    inputs.files(
+        layout.projectDirectory.dir("src/main/res/xml").asFileTree,
+        layout.projectDirectory.dir("src/debug/res/xml").asFileTree,
+    )
+        .withPropertyName("networkSecurityConfig")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

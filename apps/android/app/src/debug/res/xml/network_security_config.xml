@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY. The release policy is src/main/res/xml/, which permits
+  cleartext to loopback and nothing else; a build-type source set replaces it
+  wholesale, so this file never reaches a release APK.
+
+  Why it exists: from M5 the app talks to an OpenCode server the user runs
+  themselves, typically on a laptop on the same LAN, reached over plain HTTP at
+  an address like http://192.168.1.20:4096. The release policy would refuse that
+  connection outright.
+
+  Why it is this broad: Android's network security config matches on hostnames,
+  not address ranges, so "permit cleartext to RFC1918 only" cannot be expressed
+  here, and the host is not known until the user types it. The alternatives were
+  to demand HTTPS from a self-hosted dev server, or to relax the release policy
+  as well. Restricting the relaxation to the build type that exists for testing
+  is the narrower of the available options.
+
+  This is NOT a weakening of TLS verification. Certificate validation for https://
+  URLs is untouched - no custom trust anchors, no debug-overrides, no hostname
+  verifier. What changes is only whether the plaintext scheme is permitted at
+  all, and only in a build that is not shipped.
+
+  See ADR-0018 and .claude/rules/android.md N5.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -19,6 +19,7 @@ import { createBridge, type Bridge } from "./bridge"
 import { createAndroidDraftStore } from "./drafts"
 import { revealFocusedInput } from "./focus"
 import { createAndroidPlatform, readHostInfo } from "./platform"
+import { startupServerKey } from "./server"
 import "./styles.css"
 
 /**
@@ -242,6 +243,23 @@ function AndroidRoot(props: { bridge: Bridge }) {
   onCleanup(trackLifecycle(props.bridge))
   onCleanup(answerBack(props.bridge, back))
 
+  /**
+   * The server to start on, read from the persisted default.
+   *
+   * Mirrors what desktop does with the same `Platform.getDefaultServer` hook.
+   * `startupServerKey` guarantees a non-empty result, without which
+   * `ServerProvider` renders nothing at all - see server.ts.
+   */
+  const [startupServer] = createResource(async () => {
+    try {
+      return (await platform.getDefaultServer?.()) ?? null
+    } catch {
+      // A store that cannot be read must not stop the app from starting; the
+      // user lands on the no-server state and can pick one.
+      return null
+    }
+  })
+
   const [locale] = createResource(async () => {
     const raw = platform.storage?.("opencode.global.dat")
     if (!raw) return undefined
@@ -256,10 +274,9 @@ function AndroidRoot(props: { bridge: Bridge }) {
   return (
     <PlatformProvider value={platform}>
       <AppBaseProviders locale={locale.latest}>
-        <Show when={!locale.loading} fallback={<LoadingSplash />}>
+        <Show when={!locale.loading && !startupServer.loading} fallback={<LoadingSplash />}>
           <AppInterface
-            defaultServer={ServerConnection.Key.make("")}
-            servers={[]}
+            defaultServer={ServerConnection.Key.make(startupServerKey(startupServer.latest))}
             router={(routerProps) => <AndroidRouter {...routerProps} back={back} />}
             serverScoped={<AndroidBackHandlers back={back} />}
           />

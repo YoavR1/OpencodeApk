@@ -2,6 +2,8 @@ package ai.opencode.android.platform
 
 import android.content.Context
 import android.util.Base64
+import ai.opencode.android.security.ValueCipher
+import ai.opencode.android.security.testCipher
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -20,12 +22,14 @@ import org.robolectric.RobolectricTestRunner
 class DraftStoreTest {
 
     private lateinit var drafts: DraftStore
+    private lateinit var cipher: ValueCipher
 
     private fun b64(text: String) = Base64.encodeToString(text.toByteArray(), Base64.NO_WRAP)
 
     @Before
     fun setUp() {
-        drafts = DraftStore(ApplicationProvider.getApplicationContext<Context>())
+        cipher = testCipher()
+        drafts = DraftStore(ApplicationProvider.getApplicationContext<Context>(), cipher)
     }
 
     @Test
@@ -39,7 +43,7 @@ class DraftStoreTest {
         // Stands in for process death: the app is killed while backgrounded and
         // the next launch builds a fresh DraftStore over the same directory.
         drafts.set("session-1", "unsent")
-        val reopened = DraftStore(ApplicationProvider.getApplicationContext<Context>())
+        val reopened = DraftStore(ApplicationProvider.getApplicationContext<Context>(), cipher)
         assertEquals("unsent", reopened.get("session-1"))
     }
 

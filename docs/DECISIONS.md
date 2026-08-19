@@ -516,7 +516,11 @@ makes every new dismissable surface a two-sided change.
 
 ## ADR-0015 — Preferences are not encrypted, and credentials will not live in them
 
-**Status.** Accepted (M4).
+**Status.** ~~Accepted (M4)~~ — **SUPERSEDED by ADR-0017 (M5).** The second half
+held: credentials still do not get a plaintext home. The first half did not
+survive contact with M5, which found that upstream persists a server password
+through this exact store. Kept here because the reasoning is still worth reading
+next to what replaced it.
 
 **Context.** `Platform.storage` and the draft store are backed by named
 `SharedPreferences` files plus content-addressed blobs in `filesDir`. Neither is
@@ -585,6 +589,143 @@ Three things were needed to make it actually apply on Android:
 **Rejected alternative.** Mobile-specific Android components wrapping the shared
 screens. It would have produced something demonstrable sooner and a permanent
 second layout to maintain, against `.claude/rules/architecture.md` A1.
+
+---
+
+## ADR-0017 — The preference store is encrypted; ADR-0015 is superseded
+
+**Status.** Accepted (M5). **Supersedes ADR-0015.**
+
+**Why the earlier decision was reversed.** ADR-0015 left `Platform.storage`
+unencrypted, on the stated grounds that nothing in it was secret — it held UI
+state, layout preferences and a server URL — and that credentials would get
+storage of their own in M10.
+
+M5 falsified the premise rather than the reasoning. Upstream's `ServerProvider`
+persists a whole `ServerConnection.Http` into its `server.v3` store, and that
+object contains `http.password` (`packages/app/src/context/server.tsx`, `add()`).
+That store *is* `Platform.storage`. So the moment the app can talk to a remote
+server, a real credential is written through the path ADR-0015 said would never
+carry one.
+
+**Decision.** Encrypt every value in the preference-backed stores with AES-256-GCM
+under a key held in the Android Keystore.
+
+**Everything, rather than the values believed to be secret.** Classifying values
+is a judgement that has to be re-made every time upstream persists something new,
+and when it is made wrongly it fails silently — the value is simply in the clear
+and nothing says so. Encrypting the store removes the judgement. It also covers
+prompt drafts, which is a feature and not an accident: an unsent prompt is often
+the most sensitive thing the app is holding.
+
+**Consequences.**
+
+- Key *names* stay in the clear. They are structural (`server.v3`, `settings.v3`)
+  and leaving them readable keeps `storage.keys()` meaningful.
+- A value that cannot be decrypted reads as **absent**, never as an error. That
+  is what makes the M4→M5 upgrade survivable: existing installs hold plaintext,
+  which fails to decrypt, and the app starts with defaults instead of crashing.
+- A value that cannot be *encrypted* fails loudly. There is no plaintext
+  fallback, because a fallback is how a credential ends up in the clear.
+- Blob files (draft attachments in `filesDir`) are **not** encrypted. They are
+  app-private, `allowBackup="false"` is set, and encrypting large binaries is a
+  different performance question. Deferred to M10 with the rest of the storage
+  hardening, and stated here so it is not mistaken for coverage.
+
+**Rejected alternative: `EncryptedSharedPreferences`.** The obvious choice, and
+it is deprecated — `androidx.security:security-crypto` ships it annotated
+`@Deprecated` even in the stable 1.1.0, which was verified by decompiling the
+artifact rather than assumed. Founding the credential path that M10 inherits on
+an already-dead API is a liability, and the platform primitive it wrapped is
+available directly at minSdk 26 with no dependency at all.
+
+**Rejected alternative: a separate secure store for credentials only.** It keeps
+ADR-0015 intact but requires stripping the password out of what upstream
+persists and re-injecting it on read — real divergence in a hot path, and one
+more thing to re-apply on every upstream bump.
+
+---
+
+## ADR-0018 — Cleartext HTTP is permitted in debug builds only
+
+**Status.** Accepted (M5).
+
+**Context.** From M5 the app talks to an OpenCode server the user runs
+themselves, typically on a laptop on the same LAN at something like
+`http://192.168.1.20:4096`. The network security policy from M2 permits cleartext
+to loopback and nothing else, so that connection is refused before it is made.
+
+Android's network security config matches on **hostnames, not address ranges**,
+so "permit cleartext to RFC1918 only" cannot be expressed, and the host is not
+known until the user types it.
+
+**Decision.** A build-type source set: `src/debug/res/xml/network_security_config.xml`
+permits cleartext; `src/main/` continues to deny it everywhere except loopback.
+A debug source set replaces the file wholesale, so the relaxation cannot reach a
+release APK.
+
+**This is not a weakening of TLS.** Certificate validation for `https://` URLs is
+untouched — no custom trust anchors, no `debug-overrides`, no hostname verifier.
+What changes is whether the plaintext scheme is permitted at all, and only in the
+build that exists for testing. The M5 constraint was "do not weaken TLS handling
+to make a test server work", and no TLS handling is weakened.
+
+**Consequences.**
+
+- `NetworkSecurityConfigTest` pins the shipping policy: base-config denies
+  cleartext, the only permitted domains are `127.0.0.1` and `localhost`, and
+  neither config installs a trust anchor.
+- That test reads XML off disk, which Gradle cannot see as a dependency. The
+  files are declared as test inputs in `build.gradle.kts`; without that the task
+  stays `UP-TO-DATE` exactly when the policy changes. Verified by mutating the
+  config and watching the test fail.
+- M7's on-device server is unaffected either way — loopback is permitted in both.
+
+---
+
+## ADR-0019 — The Android WebView origin is added to the server's CORS allowlist
+
+**Status.** Accepted (M5). Divergence **D7**.
+
+**Context.** The app serves its UI from `https://appassets.androidplatform.net`
+(ADR-0008). Every request it makes to a server carries an `Authorization` header,
+which is not CORS-safelisted, so **every request is preflighted**. The server's
+allowlist (`packages/server/src/cors.ts`) permits `http://localhost:`,
+`http://127.0.0.1:`, `oc://renderer`, the Tauri origins and `*.opencode.ai` — not
+ours. Every request from the app to a remote server is therefore refused.
+
+`opencode serve` exposes **no `--cors` flag** (`packages/cli/src/commands/handlers/serve.ts`
+calls `createRoutes(password)` with no options), so this cannot be worked around
+by configuration.
+
+**Decision.** Add the origin to the allowlist as a one-line divergence.
+
+Upstream already special-cases Electron and Tauri for exactly this situation — a
+shell hosting the app locally and talking to a server elsewhere — so this is a
+mechanical addition in an established pattern, and upstreamable. The domain is
+reserved by Android for `WebViewAssetLoader` and never resolves on the public
+internet, so allowlisting it does not widen exposure to the web. The entry is an
+exact match rather than a prefix, so a lookalike host cannot satisfy it.
+
+**Consequence, and it is a real limitation.** The patch is in the **server**, so
+M5 requires a server built from this repository. A user running a released
+`opencode` binary has an unpatched allowlist and the app cannot reach it. This is
+recorded as the headline caveat in `docs/CURRENT_STATUS.md` rather than left for
+someone to discover on a phone.
+
+**Rejected alternative: a native fetch proxy.** `PlatformBase.fetch` is a
+sanctioned hook, and routing requests through Kotlin would bypass CORS entirely
+and work against any stock server. It was rejected for M5 because it means
+streaming SSE response bodies across the bridge with backpressure and abort
+handling — a large, risky mechanism — and because it would defeat one of this
+milestone's stated purposes, which is to find out whether streaming works *in the
+WebView* (Q9). It stays available as a fallback if the upstream patch is not
+accepted.
+
+**Rejected alternative: serving the UI from an already-allowed origin.**
+`http://localhost` has no port, so it does not match the allowlist's
+`http://localhost:` prefix, and moving off an `https://` origin would cost the
+secure-context APIs the shared UI relies on.
 
 ---
 

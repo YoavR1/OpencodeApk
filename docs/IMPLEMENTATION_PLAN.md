@@ -10,10 +10,10 @@ Each milestone has a paste-ready prompt in `prompts/`.
 |---|---|---|---|
 | M0 | Baseline / bootstrap | `prompts/00_BOOTSTRAP.md` | **complete** |
 | M1 | Architecture audit | `prompts/01_ARCHITECTURE_AUDIT.md` | **complete** |
-| M2 | First Android APK shell | `prompts/02_ANDROID_SHELL.md` | next |
-| M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | not started |
+| M2 | First Android APK shell | `prompts/02_ANDROID_SHELL.md` | **complete** — CI builds and verifies the APK |
+| M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | **bundle shipped; rendering was blocked by the server gate until M5** |
 | M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **code complete; device verification outstanding** |
-| M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | not started |
+| M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **code complete; device criteria open** |
 | M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | not started |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | not started |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | not started |
@@ -204,9 +204,16 @@ before attempting the on-device runtime.
 
 **Exit criteria**
 - [ ] A real agent turn completes end to end against a remote server.
-- [ ] Streaming/event updates arrive in the UI (evidence).
+      *Not verified — no device and no server in the build environment.*
+- [ ] Streaming/event updates arrive in the UI (evidence). *Open; this is **Q9**.*
 - [ ] Connection failures produce clear, non-crashing UI states.
-- [ ] `CURRENT_STATUS.md` records this as a **checkpoint, not the goal**.
+      *Upstream's `ConnectionGate` handles them by construction, but that is
+      reading, not running.*
+- [x] `CURRENT_STATUS.md` records this as a **checkpoint, not the goal**.
+
+**Found while doing M5** (all fixed): the server gate never opened, so M3/M4
+rendered nothing; `INTERNET` was never declared; and the server's CORS allowlist
+refused the app's origin.
 
 ---
 
