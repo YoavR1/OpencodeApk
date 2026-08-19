@@ -837,7 +837,7 @@ them as *potentially trustworthy* origins.
 
 ## ADR-0022 — The on-device runtime is a Node process, not Bun
 
-**Status.** Accepted (M6), with one proof outstanding. Resolves **Q8**.
+**Status.** Accepted (M6), **proven end to end on hardware**. Resolves **Q8**.
 
 **Context.** The project's goal needs the OpenCode server running on the phone.
 Upstream's own runtime is Bun, which publishes no Android/Bionic build, so the
@@ -853,7 +853,9 @@ question was whether *any* viable runtime exists.
 - That bundle **runs on plain Node** with the PTY import shimmed: server up in
   1.4 s, `/global/health` healthy.
 - **Node 26.4.0 for Android aarch64 executes on the test device** — a OnePlus 15,
-  Android 16, unrooted. This is the result the milestone existed to obtain.
+  Android 16, unrooted — and **the OpenCode server runs on it**: ready in 3.1 s,
+  `/global/health` healthy, `/api/session` answering. That is the result the
+  milestone existed to obtain, and it is a measurement rather than a plan.
 - The app may execute a binary shipped as a jniLib, and **may not** execute one
   in `filesDir` — W^X measured, not assumed, by an instrumented test running as
   the app's own uid.
@@ -889,11 +891,19 @@ N3); `nodejs-mobile` (Node 18, below the `node:sqlite` floor); and any JS engine
 without Node APIs, since the bundle needs `child_process`, `fs`, `dgram`, `dns`
 and more.
 
-**Open, and able to overturn this.** `bun-linux-aarch64-musl` is *statically*
-linked and therefore needs no system libc. If it executes on an Android kernel,
-Bun becomes simpler than Node in every dimension — one binary, no library
-patching, upstream's own runtime. It has not been tested. This ADR should be
-revisited before M7 rather than after.
+**The obvious alternative was tested and does not work.** `bun-linux-aarch64-musl`
+looked like it might sidestep everything, since musl builds are commonly static
+and a static binary needs no system libc. It is not static: its `PT_INTERP` is
+`/lib/ld-musl-aarch64.so.1`, a loader Android does not ship, and the phone
+refuses it with the ENOENT-on-exec that a missing interpreter produces. Bundling
+a musl loader to run a runtime never built for Bionic is a far worse bet than a
+Node build that already works.
+
+**One environment consequence.** Reusing someone else's build brings its compiled-in
+paths: OpenSSL's config, `child_process`'s default shell, and `HOME` all point
+into Termux's prefix and must be overridden (`docs/LOCAL_RUNTIME_SPIKE.md` §3a).
+In the app these become `filesDir`-relative, and they are a further argument for
+compiling Node rather than redistributing an artifact.
 
 ---
 

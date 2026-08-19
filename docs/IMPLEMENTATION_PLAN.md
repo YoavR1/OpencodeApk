@@ -14,7 +14,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | **complete — UI verified rendering on a device in M5** |
 | M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **complete — mobile layout, IME and notifications verified on a device in M5** |
 | M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **working on hardware; LAN-over-HTTP impossible (ADR-0021)** |
-| M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | **runtime proven on device; one combination step outstanding** |
+| M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | **complete — the server runs on the phone** |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | not started |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | not started |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | not started |
@@ -249,8 +249,8 @@ ARM64. **No production code.** The deliverable is a report plus artifacts.
 - [x] Native-dependency matrix with per-item Android arm64 status.
 - [x] ADR recording the runtime decision.
 - [x] Explicit list of features lost or degraded — terminals, and only terminals.
-- [ ] The OpenCode server running on the Android Node build **on the device**.
-      Staged; interrupted when the phone disconnected. One command to finish.
+- [x] The OpenCode server running on the Android Node build **on the device** —
+      ready in 3.1 s, `/global/health` healthy, `/api/session` answering.
 
 **If no candidate is viable:** say so plainly, record it, and escalate to the user
 before proceeding. Do not silently redefine the goal as remote-only.

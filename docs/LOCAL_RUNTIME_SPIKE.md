@@ -3,11 +3,36 @@
 **Question.** Can OpenCode run *on the phone*, in a stock unrooted Android app,
 with no visible Termux workflow?
 
-**Answer so far: yes, with one step left to close.** Every component has been run
-on real hardware. The last combination — the OpenCode server running on the
-Android Node build, on the device — was staged and interrupted when the phone
-disconnected. That is stated plainly rather than glossed, and
-`spike/m6/run-on-device.sh` completes it in one command.
+**Answer: yes, proven end to end on hardware.** The OpenCode server runs on the
+phone, on Android's own Node, and answers real API calls:
+
+```
+== Q4 - does the runtime execute on this phone? ==
+v26.4.0 arm64 android
+
+== Q3 - can it launch a shell command? ==
+shell-from-node
+
+== Q2 - can it do a filesystem operation? ==
+fs-ok
+
+== Q1 - can it serve OpenCode on loopback? ==
+exports: Config, Database, Server, bootstrap
+import took: 2092 ms
+listening on: http://127.0.0.1:4600
+ready after: 3086 ms
+```
+
+```
+$ adb forward tcp:4601 tcp:4600
+$ curl http://127.0.0.1:4601/global/health
+{"healthy":true,"version":"0.0.0-claude/opencode-android-bootstrap-o58939-…"}
+
+$ curl "http://127.0.0.1:4601/api/session?limit=5"
+{"data":[],"cursor":{"previous":null,"next":null}}
+```
+
+Reproduce with `bash spike/m6/run-on-device.sh`.
 
 **Device under test.** OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a,
 unrooted.
@@ -157,16 +182,33 @@ All redistributable. Termux packages are builds of those upstreams; a shipping
 product should build them itself rather than redistribute Termux artifacts, which
 is also what fixes problems 1 and 2.
 
-### B. Bun on Android — **blocked, and worth one experiment**
+### B. Bun on Android — **tested and rejected**
 
-Bun publishes Linux builds against **glibc and musl**; there is no Android/Bionic
-target. Upstream's own default runtime therefore cannot be used directly.
+Bun publishes Linux builds against glibc and musl; there is no Android/Bionic
+target. The musl build looked like it might work anyway, since musl builds are
+commonly static and a static binary needs no system libc at all. It was worth an
+experiment, and the experiment settles it:
 
-One experiment has not been run and should be: `bun-linux-aarch64-musl` is
-*statically* linked, and a static binary needs no system libc at all. If it
-executes on an Android kernel it would collapse the whole problem — one 50 MB
-binary, no library patching, and upstream's native runtime rather than a Node
-build. **Not yet tested.** Until it is, this stays unproven in both directions.
+```
+$ adb push bun /data/local/tmp/m6/bun && adb shell chmod 755 …
+$ adb shell /data/local/tmp/m6/bun --version
+/system/bin/sh: /data/local/tmp/m6/bun: No such file or directory
+```
+
+That message on a file that plainly exists means the ELF interpreter is missing.
+Reading the header confirms it:
+
+```
+$ python … PT_INTERP
+size: 87.4 MB
+PT_INTERP: /lib/ld-musl-aarch64.so.1
+```
+
+**Bun's musl build is dynamically linked against a musl loader Android does not
+have.** Shipping `ld-musl` alongside it and invoking the loader explicitly is
+conceivable, but that puts musl userspace on top of a Bionic system for a runtime
+that has never been built for it — a much worse bet than a Node build that
+already works. Rejected, on evidence rather than inference.
 
 ### C. Bundled Linux rootfs under proot — **rejected**
 
@@ -197,11 +239,26 @@ and supplying one is a larger project than this one.
 
 | # | Question | Answer |
 |---|---|---|
-| 1 | Can we start a local OpenCode-compatible server on loopback? | **Proven on desktop** (`/global/health` healthy). On device: the runtime is proven and the bundle is staged; the launch is the one step outstanding. |
-| 2 | Can it perform a trivial filesystem operation? | ✅ from the app (instrumented test); from Node on device, scripted, not yet run |
-| 3 | Can it launch a shell command? | ✅ from the app (instrumented test) |
+| 1 | Can we start a local OpenCode-compatible server on loopback? | ✅ **on the phone**, ready in 3.1 s, `/global/health` healthy and `/api/session` answering |
+| 2 | Can it perform a trivial filesystem operation? | ✅ from the app (instrumented test) **and** from Node on the device (`fs-ok`) |
+| 3 | Can it launch a shell command? | ✅ from the app (instrumented test) **and** from Node on the device (`shell-from-node`) |
 | 4 | Can it run on ARM64 Android without root? | ✅ **Node 26.4.0 printed its version on the device** |
-| 5 | What must be bundled or built specially? | Node + 10 shared libraries (97.3 MB), the ~37 MB app bundle, `jsonc-parser`, and **a PTY solution or the loss of terminals** |
+| 5 | What must be bundled or built specially? | Node + 10 shared libraries (97.3 MB), the ~37 MB app bundle, `jsonc-parser`, **a PTY solution or the loss of terminals**, and the environment in §3a |
+
+### 3a. The environment the runtime needs
+
+Found by running it, one failure at a time. Each is a consequence of reusing
+someone else's build, and each is a reason to compile Node rather than
+redistribute an artifact:
+
+| Variable | Why | Symptom without it |
+|---|---|---|
+| `OPENSSL_CONF` | OpenSSL's config path is compiled in, pointing at Termux's prefix | every crypto-touching call dies with `BIO_new_file … Permission denied` |
+| shell path | `child_process` defaults to Termux's `sh` | `spawnSync … EACCES` — and OpenCode spawns shells for its bash tool |
+| `HOME` | bootstrap creates config and data directories under `~` | `ENOENT: mkdir '/.config'` |
+| `TMPDIR`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` | keeps state inside app-private storage | writes escape to unwritable paths |
+
+In the app these all become `filesDir`-relative, which is M7's plumbing.
 
 ---
 
@@ -233,9 +290,8 @@ Recorded as **ADR-0022**.
 
 ### Before M7 can start
 
-1. **Finish the on-device proof** — `spike/m6/run-on-device.sh`. One command.
-2. **Test static-musl Bun** on the device. If it runs, candidate B is simpler than
-   A and the recommendation should change.
+1. ~~Finish the on-device proof~~ — **done**, see the top of this document.
+2. ~~Test static-musl Bun~~ — **done**, it needs a musl loader Android lacks.
 3. **Decide how Node is built.** Reusing Termux artifacts is fine for a spike and
    wrong for a product; an NDK build with `--with-intl=small-icu` addresses the
    33 MB of ICU data and the `.so.78` naming in one move.
