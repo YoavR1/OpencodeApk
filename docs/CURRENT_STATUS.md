@@ -9,7 +9,7 @@
 | **Last updated** | 2026-08-20 |
 | **Session** | M11 polish and release engineering |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M11 — a signed release APK runs standalone on hardware; 3 findings fixed; CI signing and one layout gap open** |
+| **Current milestone** | **M11 — signed, reproducible release runs standalone on hardware; 4 findings fixed; only a real agent turn remains** |
 | **Next milestone** | **A real agent turn — the last unverified core claim** |
 | **Next prompt** | — |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
@@ -69,20 +69,53 @@ debug-signed one installs, looks finished, and can never be upgraded by a
 properly signed build. Verified with a throwaway key kept outside the repository:
 `V3.0 Signer: certificate DN: CN=OpenCode Release Test...`.
 
+### Closing the gaps
+
+Everything listed as open at the end of the first M11 pass is now done, except
+the one that needs a provider credential.
+
+**Builds are bit-for-bit reproducible.** Not a caveat any more — measured:
+
+```
+a sha256 : 3e248501c566038418f7294e545dfc6f4c0cf4f0dd8380a9a792fadb04bc4ddb
+b sha256 : 3e248501c566038418f7294e545dfc6f4c0cf4f0dd8380a9a792fadb04bc4ddb
+[ok]   the release APK is bit-for-bit reproducible
+```
+
+Two changes made it hold: `buildToolsVersion` is pinned (AGP otherwise picks the
+newest installed, so two machines differ silently), and `dependenciesInfo` is off
+(AGP otherwise appends a protobuf of the resolved dependency tree, which varies
+with resolution order — and ships a dependency inventory to anyone who unzips the
+APK). `scripts/ci/check-reproducible.sh` keeps it checkable.
+
+**The last licence gap is closed.** The Apache-2.0 WITH LLVM-exception text for
+`libc++_shared.so` came from the Android NDK's own `NOTICE.toolchain` — the
+toolchain that builds that library — with the appendix and the exception clause
+in full. The collector now runs with no errors and no warnings: 12 licence texts
+for 16 libraries.
+
+**The landscape button row wraps.** 316 px of buttons in a 262 px row, `nowrap`,
+so "Not yet" was cut mid-word. `flex-wrap: wrap` is inert while items fit and
+does nothing on a non-flex element, which is what makes it safe to apply to the
+card body's rows rather than one hand-picked node — and the row carries no class
+of its own to target. Verified in the shipped build: `flexWrap=wrap`,
+`scrollW=262 clientW=262`, no overflow.
+
+**CI signs when it can.** It decodes the keystore into `$RUNNER_TEMP` (never the
+checkout), deletes it with `if: always()`, and runs `apksigner verify` afterwards
+rather than assuming the environment took effect. With no secrets set it stays
+unsigned, so forks and pull requests still build green.
+
 ### What is NOT done
 
-- **Release signing in CI with real secrets.** The mechanism and workflow snippet
-  are written; no keystore exists for this project, so nothing has been signed in
-  CI. CI does build the release variant unsigned, so the path stays covered.
-- **One layout gap.** The onboarding card's button row clips horizontally at 1.5×
-  font in landscape ("Not yet" is cut mid-word). I could not identify the element
-  reliably — the app renders hidden duplicates that kept matching first — so it
-  is a documented limitation rather than an unverified CSS change.
-- **Bit-for-bit reproducible builds** are not claimed. Nothing is fetched at build
-  time and our own steps embed no timestamps, but AGP metadata and zip ordering
-  are not normalised. `docs/RELEASE.md` §5 says so rather than implying more.
+- **A keystore for this project.** Four secrets turn CI signing on
+  (`docs/RELEASE.md` §3). Generating the key is a decision with permanent
+  consequences — the key *is* the app's identity, and an app signed with a
+  different one cannot update an existing install — so it belongs to whoever owns
+  the release, not to a build script.
 - **R8 with a real agent turn.** The shrunk build was verified running, but not
-  through the code paths a turn exercises.
+  through the code paths a turn exercises. Blocked on the same provider credential
+  as everything else below.
 
 ---
 
@@ -570,9 +603,7 @@ meant four defects away from functioning. That distinction is already in
 | **Provider API keys encrypted at rest** | Upstream writes `auth.json` in plaintext at mode 0600; encrypting it forks upstream's auth path. `docs/SECURITY.md` §3. |
 | **Session database at rest** | Unencrypted in the app sandbox. Deferred with `auth.json` — the same decision. |
 | An adversarial app probing the exported Activity / loopback port | The properties were established from the merged manifest and socket measurements, not by installing a hostile app. ASSUMED, not VERIFIED. |
-| Signing in CI with real secrets | The mechanism is built and verified locally with a throwaway key; no project keystore exists. `docs/RELEASE.md` §3. |
-| Bit-for-bit reproducible builds | Not claimed. AGP metadata and zip ordering are not normalised. `docs/RELEASE.md` §5. |
-| The LLVM libc++ licence text | Apache-2.0 §4(a) requires shipping it; network fetching failed behind the proxy and writing it from memory was not acceptable. Blocks public distribution, not building. `docs/LICENSES.md` §6. |
+| A keystore for this project | CI signing is wired and verified locally; four secrets switch it on. Creating the key is the release owner's decision. `docs/RELEASE.md` §3. |
 | Basic auth against a live server | The test server ran unsecured, so no credential entered the source. `createSdkForServer` is upstream code and unchanged. |
 
 ## Recommended next session

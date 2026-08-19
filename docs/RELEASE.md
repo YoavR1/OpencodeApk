@@ -82,18 +82,28 @@ again under the same identity.
 
 ### In CI
 
-Store the keystore as a base64 secret and materialise it into the runner's
-workspace at build time, never into the checkout:
+**This is already wired** in `.github/workflows/android-ci.yml`. It signs when
+the repository has the secrets and leaves the APK unsigned when it does not, so
+forks and pull requests — which cannot read secrets — still build green.
 
-```yaml
-- run: echo "${{ secrets.OPENCODE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/ks.jks"
-- run: ./gradlew bundleRelease
-  env:
-    OPENCODE_KEYSTORE: ${{ runner.temp }}/ks.jks
-    OPENCODE_KEYSTORE_PASSWORD: ${{ secrets.OPENCODE_KEYSTORE_PASSWORD }}
-    OPENCODE_KEY_ALIAS: ${{ secrets.OPENCODE_KEY_ALIAS }}
-    OPENCODE_VERSION_CODE: ${{ github.run_number }}
-```
+To turn it on, set four repository secrets:
+
+| Secret | Value |
+|---|---|
+| `OPENCODE_KEYSTORE_B64` | `base64 -w0 opencode-release.jks` |
+| `OPENCODE_KEYSTORE_PASSWORD` | the store password |
+| `OPENCODE_KEY_ALIAS` | the key alias |
+| `OPENCODE_KEY_PASSWORD` | the key password, if it differs from the store's |
+
+The workflow decodes the keystore into `$RUNNER_TEMP` — never the checkout, so no
+later step can commit it — deletes it afterwards with `if: always()`, and then
+runs `apksigner verify --print-certs` to prove the artifact really is signed
+rather than assuming the environment took effect.
+
+**No keystore has been created for this project.** Generating one is a decision
+with permanent consequences: the key *is* the app's identity, and an app signed
+with a different one cannot update an existing install. That belongs to whoever
+owns the release, not to a build script.
 
 ## 4. Versioning
 
@@ -113,21 +123,37 @@ with its previous state.
 
 ## 5. Reproducibility
 
-The build is reproducible in the sense that matters here: **the same inputs
-produce the same APK contents.** Two properties support that.
+**The release APK is bit-for-bit reproducible.** Measured, not assumed — two
+`clean assembleRelease` runs from the same inputs:
 
-- Nothing is fetched at build time. The renderer bundle, the runtime binaries and
-  the licence texts are all materialised into the tree by the scripts above,
+```
+APK sha256 identical: True
+entry list identical (incl. order): True
+entries with differing CONTENT: 0
+```
+
+`scripts/ci/check-reproducible.sh` performs that comparison.
+
+Four things make it hold:
+
+- **Nothing is fetched at build time.** The renderer bundle, the runtime binaries
+  and the licence texts are all materialised into the tree by the scripts above,
   before Gradle runs.
-- No timestamps are embedded by our own steps. `build-info.json` records the
-  channel and nothing else, specifically so that two identical inputs do not
-  produce different outputs.
+- **No timestamps from our own steps.** `build-info.json` records the channel and
+  nothing else, specifically so that identical inputs cannot produce differing
+  output.
+- **`buildToolsVersion` is pinned.** AGP otherwise selects the newest build-tools
+  installed, so two machines silently produce different output.
+- **`dependenciesInfo` is off** for both APK and AAB. AGP otherwise appends a
+  signed protobuf of the resolved dependency tree, which varies with resolution
+  order — and ships a dependency inventory to anyone who unzips the APK.
 
-What is *not* claimed: byte-identical APKs across machines. AGP embeds build
-tooling versions, and the zip contains ordering and timestamp metadata this
-project does not currently normalise. Achieving bit-for-bit reproducibility would
-need `SOURCE_DATE_EPOCH` handling and a pinned build-tools version; it has not
-been done and is not asserted.
+Scope of the claim: same toolchain, same inputs. It was verified on one machine.
+Reproducing it elsewhere additionally requires the same AGP, Gradle and JDK
+versions; the Gradle wrapper and version catalog pin the first two, and
+`docs/CLAUDE_CLOUD_SETUP.md` records the JDK. Signing is applied after packaging
+and does not affect this comparison — it is deliberately measured on the unsigned
+artifact.
 
 ## 6. What the release build verifies
 

@@ -341,7 +341,9 @@ Some things only a human with a phone can confirm. Record results in
 | Release build is not debuggable | M11 | ✅ `run-as` refused on the release APK |
 | No DEV badge in a release build | M11 | ✅ was present; fixed and re-photographed |
 | Landscape at 1.5× font: content reachable | M11 | ✅ was 555 px clipped to 323 px; now scrolls |
-| Landscape at 1.5× font: onboarding card buttons | M11 | 🚫 **known limitation** — "Not yet" clips horizontally; documented in `docs/INSTALL.md` §5 |
+| Landscape at 1.5× font: onboarding card buttons | M11 | ✅ **fixed** — was 316 px of buttons in 262 px; they now wrap |
+| **The release APK is bit-for-bit reproducible** | M11 | ✅ two clean builds, identical sha256 (`scripts/ci/check-reproducible.sh`) |
+| Every bundled library ships its full licence text | M11 | ✅ 12 texts for 16 libraries; no warnings |
 | **The network security config does NOT constrain the server** | M10 | ✅ restrictive policy installed, Node still reached a public host over cleartext (204) |
 | OpenCode config is writable by the agent | M10 | ✅ persistence/exfiltration vector, documented |
 | Runtime binaries are not writable (W^X) | M10 | ✅ `SandboxPostureTest` |

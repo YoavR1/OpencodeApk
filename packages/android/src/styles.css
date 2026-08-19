@@ -86,3 +86,26 @@ body {
     overflow-y: auto;
   }
 }
+
+/*
+ * Button rows in card bodies wrap instead of overflowing.
+ *
+ * Upstream lays these out as a `nowrap` flex row, which is right on a desktop
+ * card that is always wide enough. On a phone it is not: measured on the
+ * onboarding card in landscape at font scale 1.5, the row held 316px of buttons
+ * in 262px and clipped the second one - "Not yet" was cut through the middle,
+ * with no way to read or reliably tap it.
+ *
+ * `flex-wrap: wrap` is inert while the items fit, and on a non-flex element it
+ * does nothing at all, so this cannot change a layout that was not already
+ * overflowing. That is what makes it safe to apply to the card body's rows
+ * generally rather than to one hand-picked element - and the row itself carries
+ * no class of its own to target.
+ *
+ * Not scoped to a breakpoint on purpose: the trigger is the row being narrower
+ * than its buttons, which a long translation or a large font scale can cause at
+ * any viewport size.
+ */
+[class~="rounded-xl"] [class~="flex-col"][class~="gap-6"] > div {
+  flex-wrap: wrap;
+}

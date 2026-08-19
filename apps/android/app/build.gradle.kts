@@ -60,6 +60,21 @@ android {
     namespace = "ai.opencode.android"
     compileSdk = 37
 
+    // Pinned, not inferred. AGP otherwise picks the newest build-tools installed,
+    // so the same source produces different output on two machines - and the
+    // difference is invisible until someone compares two APKs.
+    buildToolsVersion = "37.0.0"
+
+    // AGP appends a signed protobuf blob of the full dependency tree to release
+    // artifacts. It is not reproducible (it varies with resolution order), it is
+    // not readable by the person shipping the app, and it is only consumed by
+    // Play. Dropping it removes a source of build variance and stops shipping a
+    // dependency inventory to anyone who unzips the APK.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
     defaultConfig {
         applicationId = "ai.opencode.android"
         minSdk = 26

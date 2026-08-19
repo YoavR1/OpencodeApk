@@ -79,7 +79,10 @@ LIBRARIES = {
     "libz1.so": Component("zlib", "Zlib", "https://github.com/madler/zlib", doc="zlib"),
     "libsqlite3.so": Component("SQLite", "blessing (public domain)", "https://sqlite.org"),
     "libc++_shared.so": Component(
-        "LLVM libc++", "Apache-2.0 WITH LLVM-exception", "https://github.com/llvm/llvm-project"
+        "LLVM libc++",
+        "Apache-2.0 WITH LLVM-exception",
+        "https://github.com/llvm/llvm-project",
+        vendored="Apache-2.0-LLVM.txt",
     ),
     "libcrypto3.so": Component(
         "OpenSSL", "Apache-2.0", "https://github.com/openssl/openssl", vendored="Apache-2.0-OpenSSL.txt"

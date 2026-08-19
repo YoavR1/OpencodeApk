@@ -282,6 +282,25 @@ jobs:
       # Unsigned on purpose - no signing secrets are needed to prove the release
       # variant assembles, and CI should not require them to stay green. Signing
       # is documented in docs/RELEASE.md and applied when a release is cut.
+      # Signing material, when the repository has it. A fork or a PR from one has
+      # no access to secrets, and this must not fail there - the release build
+      # simply stays unsigned, which is the documented behaviour (ADR-0031).
+      - name: Prepare signing key
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.OPENCODE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "No signing secret configured; the release build will be unsigned."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Into the runner's temp, never the checkout: a keystore must not be
+          # capable of being committed by a later step.
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
       - name: Release build gates
         run: |
           set -euo pipefail
@@ -291,6 +310,25 @@ jobs:
         env:
           OPENCODE_VERSION_NAME: 0.1.0-ci
           OPENCODE_VERSION_CODE: ${{ github.run_number }}
+          # Empty when unconfigured, which the build treats as "leave it unsigned"
+          # rather than falling back to the debug key.
+          OPENCODE_KEYSTORE: ${{ steps.signing.outputs.configured == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          OPENCODE_KEYSTORE_PASSWORD: ${{ secrets.OPENCODE_KEYSTORE_PASSWORD }}
+          OPENCODE_KEY_ALIAS: ${{ secrets.OPENCODE_KEY_ALIAS }}
+          OPENCODE_KEY_PASSWORD: ${{ secrets.OPENCODE_KEY_PASSWORD }}
+
+      # The keystore is deleted immediately, not left for later steps to trip
+      # over. `always()` so a failed build does not leave it on the runner.
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Confirm the release APK is signed
+        if: steps.signing.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          apk="$(find . -name 'app-release*.apk' -path '*outputs*' | head -1)"
+          apksigner verify --print-certs "$apk"
 
       - name: Verify release APK
         run: scripts/ci/verify-apk.sh "$(find . -name 'app-release*.apk' -path '*outputs*' | head -1)"

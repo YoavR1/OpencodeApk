@@ -101,27 +101,27 @@ must not depend on a network round-trip to a third-party host, and because the
 exact text that accompanied a build is part of what makes that build
 reproducible.
 
-## 6. Known gap
+## 6. Apache-2.0 also requires the text
 
-**LLVM libc++ (`libc++_shared.so`) ships without its licence text.**
-Apache-2.0 §4(a) requires giving recipients a copy of the licence, so this is an
-obligation, not a nicety — but it carries no source obligation, so it is reported
-as a `WARN` rather than failing the build:
+Apache-2.0 §4(a) obliges us to give recipients a copy of the licence, with no
+source obligation attached. The collector tracks that separately from copyleft so
+that a missing Apache text is reported rather than passing silently just because
+it is permissive.
 
-```
-WARN:  LLVM libc++ is Apache-2.0 WITH LLVM-exception, which requires the licence
-       text to accompany the binary (Apache-2.0 section 4a). Not bundled; add it
-       before publishing.
-```
+Both Apache-2.0 components now ship their text:
 
-It is not bundled because neither the Termux package nor this machine carries the
-LLVM exception text, and network fetching failed behind the proxy during M11.
-Writing the text from memory was not acceptable for a legal document.
+- **OpenSSL** — its own `LICENSE`, as the library distributes it.
+- **LLVM libc++** — the LLVM section of the Android NDK's `NOTICE.toolchain`
+  (NDK 27.1.12297006), which is the toolchain that builds this library. It
+  carries the Apache-2.0 appendix and the LLVM exception clause in full.
 
-**This blocks public distribution.** It does not block building, testing, or
-sideloading, which is why the release build is allowed to proceed. Resolving it
-is one file: fetch `LICENSE.TXT` from the llvm-project repository into
-`licenses/Apache-2.0-LLVM.txt` and add `vendored=` to the component entry.
+The collector now runs clean: `wrote NOTICE.txt and 12 licence text(s) for 16
+libraries`, with no errors and no warnings.
+
+Both were taken from a distributor's own copy on this machine rather than fetched
+over the network. Licence texts are legal documents; reproducing one from memory
+is not acceptable, and depending on a third-party host at release time is not
+either.
 
 ## 7. Upstream OpenCode
 

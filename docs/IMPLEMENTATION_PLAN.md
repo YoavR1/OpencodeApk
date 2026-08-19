@@ -19,7 +19,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | **projects and Git on device; terminals deferred (ADR-0025)** |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | **in progress — 8/10 device checks pass; 2 need a provider credential** |
 | M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | **in progress — threat review done, 3 findings fixed + 2 documented; `auth.json`, config hardening and the session DB deferred with reasons** |
-| M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | **in progress — signed release runs on hardware; 3 findings fixed; CI signing and one layout gap open** |
+| M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | **complete except a real agent turn — signed reproducible release runs on hardware; 4 findings fixed** |
 
 `docs/CURRENT_STATUS.md` is authoritative for status. This table is a summary.
 
@@ -424,16 +424,20 @@ the project real.
       *`docs/INSTALL.md` — requirements, first run, limitations, troubleshooting,
       attribution. README corrected; it still claimed M1 with no application code.*
 - [x] `CURRENT_STATUS.md` reflects release state.
-- [ ] Full `docs/TEST_MATRIX.md` passes.
-      *One row is 🚫: the onboarding card's button row clips horizontally at 1.5×
-      font in landscape. Documented as a known limitation rather than fixed with
-      an unverified CSS change.*
-- [ ] Release signing in **CI** with real secrets.
-      *The mechanism and the workflow snippet are in `docs/RELEASE.md` §3; no
-      keystore exists for this project yet, so nothing has been signed in CI.*
+- [x] Full `docs/TEST_MATRIX.md` passes.
+      *The landscape button-row clipping is fixed: the row held 316 px of buttons
+      in 262 px, and now wraps. No 🚫 rows remain for M11.*
+- [x] Release signing wired in **CI**.
+      *Signs when the repository has the secrets, stays unsigned when it does not
+      so forks and PRs still build, and verifies the result with `apksigner`.
+      Setting the secrets needs a keystore, which is the release owner's decision
+      to make — `docs/RELEASE.md` §3.*
+- [x] Builds are bit-for-bit reproducible.
+      *Measured: two clean release builds, identical sha256.
+      `scripts/ci/check-reproducible.sh`.*
 - [ ] R8 keep rules exercised by a real agent turn.
       *R8 is on and the app was verified running, but the code paths a turn
-      exercises have not been through a shrunk build.*
+      exercises have not been through a shrunk build. Blocked on a credential.*
 
 **Found while doing this milestone**
 - A **DEV badge shipped in the release APK** — upstream defaults the channel to
