@@ -42,6 +42,17 @@ android {
         buildConfig = true
     }
 
+    // M6 spike: the instrumented feasibility test ships a real arm64 executable
+    // as a jniLib to measure what an app may actually exec. Debug builds must
+    // extract native libraries for that path to exist at all - with the modern
+    // default they are mapped straight out of the APK and nativeLibraryDir holds
+    // nothing to run. Release is untouched; nothing here ships.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     testOptions {
         unitTests {
             // Lets JVM unit tests touch android.util.Log without an "not mocked"

@@ -12,7 +12,7 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 | Layer | Status |
 |---|---|
 | Android JVM unit tests | ✅ **82 tests**, run in CI by `testDebugUnitTest` |
-| Android instrumented tests | ✅ **9 tests, RUN AND PASSING on a OnePlus 15** (M5) — locally, not in CI |
+| Android instrumented tests | ✅ **15 tests, RUN AND PASSING on a OnePlus 15** (M5/M6) — locally, not in CI |
 | Renderer tests | ✅ **97 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
 | Device verification | ✅ **the app runs, connects and streams** — see `docs/CURRENT_STATUS.md` |
 | Cross-language contract | ✅ TS ↔ Kotlin bridge method lists compared mechanically |
@@ -115,6 +115,12 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Keystore | The key is really in `AndroidKeyStore` | M5 | ✅ **passed on device** |
 | Keystore | **The key material cannot be exported** | M5 | ✅ **passed on device** |
 | Keystore | A value survives a new cipher instance; another alias cannot read it | M5 | ✅ **passed on device** |
+| Runtime | The app can launch a shell command | M6 | ✅ **passed on device** |
+| Runtime | **An executable shipped as a jniLib runs from `nativeLibraryDir`** | M6 | ✅ **passed on device** |
+| Runtime | **An executable in `filesDir` cannot be run — W^X** | M6 | ✅ **passed on device** |
+| Runtime | The app can bind a loopback port | M6 | ✅ **passed on device** |
+| Runtime | The app can read and write its own storage | M6 | ✅ **passed on device** |
+| Runtime | The app is not running as root | M6 | ✅ **passed on device** |
 | App launch | Activity starts without crashing | M2 | ✅ **passed on device** |
 | App identity | `packageName` is `ai.opencode.android` | M2 | ✅ **passed on device** |
 | WebView | Security settings locked down (file access off both forms) | M2 | ✅ **passed on device** |

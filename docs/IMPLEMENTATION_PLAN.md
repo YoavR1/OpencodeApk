@@ -14,7 +14,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M3 | Shared OpenCode UI | `prompts/03_SHARED_UI.md` | **complete — UI verified rendering on a device in M5** |
 | M4 | Android platform adapter / mobile UX | `prompts/04_MOBILE_PLATFORM_ADAPTER.md` | **complete — mobile layout, IME and notifications verified on a device in M5** |
 | M5 | Remote server integration (checkpoint) | `prompts/05_REMOTE_SERVER_MODE.md` | **working on hardware; LAN-over-HTTP impossible (ADR-0021)** |
-| M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | not started |
+| M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | **runtime proven on device; one combination step outstanding** |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | not started |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | not started |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | not started |
@@ -242,11 +242,15 @@ ARM64. **No production code.** The deliverable is a report plus artifacts.
 6. Write `docs/LOCAL_RUNTIME_REPORT.md` with a recommendation and the evidence.
 
 **Exit criteria**
-- [ ] A written report with real logs/artifacts, not reasoning alone.
-- [ ] A clear recommendation, or a clear statement that no candidate is viable.
-- [ ] Native-dependency matrix with per-item Android ARM64 status.
-- [ ] ADR recording the runtime decision.
-- [ ] Explicit list of features that would be lost or degraded.
+- [x] A written report with real logs/artifacts — `docs/LOCAL_RUNTIME_SPIKE.md`.
+      *(The prompt names it LOCAL_RUNTIME_SPIKE.md; this plan previously said
+      LOCAL_RUNTIME_REPORT.md. The prompt won.)*
+- [x] A clear recommendation — ADR-0022, an on-device Node process.
+- [x] Native-dependency matrix with per-item Android arm64 status.
+- [x] ADR recording the runtime decision.
+- [x] Explicit list of features lost or degraded — terminals, and only terminals.
+- [ ] The OpenCode server running on the Android Node build **on the device**.
+      Staged; interrupted when the phone disconnected. One command to finish.
 
 **If no candidate is viable:** say so plainly, record it, and escalate to the user
 before proceeding. Do not silently redefine the goal as remote-only.

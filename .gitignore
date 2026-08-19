@@ -60,3 +60,9 @@ apps/android/app/src/main/assets/web/
 
 # --- Claude Code local overrides ---
 .claude/settings.local.json
+
+# M6 spike: downloaded runtime staging (see docs/LOCAL_RUNTIME_SPIKE.md)
+spike/m6/staging/
+
+# M6 spike: exec fixture copied off a device (spike/m6/provision-exec-fixture.sh)
+apps/android/app/src/debug/jniLibs/

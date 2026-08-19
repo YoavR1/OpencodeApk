@@ -1,0 +1,6 @@
+{
+  "name": "@lydell/node-pty",
+  "version": "0.0.0-spike-shim",
+  "type": "commonjs",
+  "main": "index.js"
+}

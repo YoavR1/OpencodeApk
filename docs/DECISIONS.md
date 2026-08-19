@@ -835,6 +835,68 @@ them as *potentially trustworthy* origins.
 
 ---
 
+## ADR-0022 — The on-device runtime is a Node process, not Bun
+
+**Status.** Accepted (M6), with one proof outstanding. Resolves **Q8**.
+
+**Context.** The project's goal needs the OpenCode server running on the phone.
+Upstream's own runtime is Bun, which publishes no Android/Bionic build, so the
+question was whether *any* viable runtime exists.
+
+**What the spike measured** (full evidence in `docs/LOCAL_RUNTIME_SPIKE.md`):
+
+- Upstream already has a Node build target, and it produces a bundle whose only
+  native dependency is `@lydell/node-pty`. tree-sitter and the image library
+  resolve to **WASM**, SQLite resolves to the **`node:sqlite` built-in**, and
+  `@parcel/watcher` is not referenced at all. No `.node` binding appears
+  anywhere in the output.
+- That bundle **runs on plain Node** with the PTY import shimmed: server up in
+  1.4 s, `/global/health` healthy.
+- **Node 26.4.0 for Android aarch64 executes on the test device** — a OnePlus 15,
+  Android 16, unrooted. This is the result the milestone existed to obtain.
+- The app may execute a binary shipped as a jniLib, and **may not** execute one
+  in `filesDir` — W^X measured, not assumed, by an instrumented test running as
+  the app's own uid.
+
+**Decision.** Run the OpenCode Node build in a **separate on-device Node
+process**, started by the app the way `packages/desktop/src/main/sidecar.ts`
+starts its own — which is the pattern ADR-0005 already committed to, with a
+different binary. The runtime and its libraries ship in the APK as `lib*.so` and
+are executed from `nativeLibraryDir`, because W^X leaves no alternative.
+
+It also lands where M5 finished: `http://127.0.0.1:<port>` is the one origin
+Chromium does not block from the app's `https://` page (ADR-0021), and upstream's
+CORS allowlist already permits it.
+
+**Consequences.**
+
+- **Size.** 97.3 MB of runtime uncompressed (Node 49.7 MB + 10 libraries), of
+  which `libicudata.so.78` alone is 33.1 MB, plus ~37 MB of app bundle. A Node
+  built `--with-intl=small-icu` removes most of the ICU data, which is one reason
+  to build Node rather than redistribute Termux's artifact.
+- **A build step is unavoidable.** Android extracts only `*.so`, so libraries
+  named `libicuuc.so.78` must be renamed and their `DT_NEEDED`/`SONAME` patched.
+- **`useLegacyPackaging = true`** is required, or `nativeLibraryDir` is empty and
+  there is nothing to execute.
+- **Terminals are lost until PTY is solved.** No Android arm64 build of
+  `@lydell/node-pty` exists, and the bundle imports it *statically* — so the
+  server cannot even load without something at that specifier. M8's problem, now
+  precisely defined.
+
+**Rejected.** A bundled Linux rootfs under proot (hundreds of megabytes, syscall
+emulation, and a hidden Termux, against the spirit of `.claude/rules/android.md`
+N3); `nodejs-mobile` (Node 18, below the `node:sqlite` floor); and any JS engine
+without Node APIs, since the bundle needs `child_process`, `fs`, `dgram`, `dns`
+and more.
+
+**Open, and able to overturn this.** `bun-linux-aarch64-musl` is *statically*
+linked and therefore needs no system libc. If it executes on an Android kernel,
+Bun becomes simpler than Node in every dimension — one binary, no library
+patching, upstream's own runtime. It has not been tested. This ADR should be
+revisited before M7 rather than after.
+
+---
+
 ## Open questions (not yet ADRs)
 
 | # | Question | Decide at |
@@ -846,5 +908,5 @@ them as *potentially trustworthy* origins.
 | Q5 | Terminal/PTY viability on Android (`@lydell/node-pty` is native; WebSocket transport confirmed) | M6/M8 |
 | Q6 | SQLite data-at-rest encryption | M10 |
 | Q7 | Distribution channel (Play Store, GitHub Releases, F-Droid) | M11 |
-| Q8 | `EmbeddedProcessRuntime` (exec `lib*.so`) vs `EmbeddedInProcessRuntime` (JNI in a `:opencode` process) | M6 |
-| Q9 | Does SSE over `fetch` + `ReadableStream` work reliably in Android WebView? | M5 — verify on a real device |
+| ~~Q8~~ | ~~`EmbeddedProcessRuntime` vs `EmbeddedInProcessRuntime`~~ | **Resolved — ADR-0022: a separate Node process from `lib*.so`** |
+| ~~Q9~~ | ~~SSE over `fetch` in Android WebView~~ | **Resolved — yes, verified on a device in M5** |

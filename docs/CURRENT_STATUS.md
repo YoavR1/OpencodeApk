@@ -7,11 +7,11 @@
 | | |
 |---|---|
 | **Last updated** | 2026-08-19 |
-| **Session** | M5 remote server integration — **verified on hardware** |
+| **Session** | M6 local runtime feasibility spike |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M5 — working for the loopback/HTTPS case; LAN-over-HTTP is impossible (ADR-0021)** |
-| **Next milestone** | **M6 — local runtime feasibility spike** |
-| **Next prompt** | **`prompts/06_LOCAL_RUNTIME_SPIKE.md`** |
+| **Current milestone** | **M6 — a viable runtime found and proven to run on the device; one combination step outstanding** |
+| **Next milestone** | **M7 — local runtime integration** |
+| **Next prompt** | **`prompts/07_LOCAL_RUNTIME_INTEGRATION.md`** — after the two checks below |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
@@ -19,7 +19,41 @@
 
 ---
 
-## The app works
+## M6: the project's goal is reachable
+
+The milestone that decides whether a standalone app is possible. **It is.**
+
+- **Node 26.4.0 for Android aarch64 runs on the OnePlus 15**, unrooted:
+  `LD_LIBRARY_PATH=… ./node --version` → `v26.4.0`. That is the result M6
+  existed to obtain.
+- **Upstream's Node build works and needs almost nothing native.** Built it, ran
+  it, served `/global/health` in 1.4 s. tree-sitter and imaging resolve to WASM,
+  SQLite to the `node:sqlite` built-in, `@parcel/watcher` is not referenced, and
+  no `.node` binding appears anywhere. **The only native blocker is PTY.**
+- **W^X measured, not assumed.** An instrumented test running as the app's own
+  uid confirms the app may execute a binary shipped as a jniLib and may **not**
+  execute one in `filesDir`. 15/15 pass on the device.
+- **Sizes measured from the ELF:** 97.3 MB of runtime (Node + 10 libraries, of
+  which `libicudata.so.78` alone is 33.1 MB) plus ~37 MB of app bundle.
+
+Recommendation: an on-device Node process started like the desktop sidecar
+(**ADR-0022**). It lands exactly where M5 finished — `http://127.0.0.1:<port>` is
+the one origin mixed content does not block (ADR-0021).
+
+**Two things must happen before M7 starts**, both cheap:
+
+1. **Finish the on-device proof.** The runtime is proven and the bundle is staged
+   on the phone; the launch was interrupted when the device disconnected.
+   `bash spike/m6/run-on-device.sh` completes it in one command.
+2. **Test static-musl Bun on the device.** `bun-linux-aarch64-musl` is statically
+   linked and needs no system libc. If it runs, it is simpler than Node in every
+   dimension and ADR-0022 should be revisited rather than built on.
+
+Full evidence: `docs/LOCAL_RUNTIME_SPIKE.md`.
+
+---
+
+## M5: the app works
 
 For the first time, the real OpenCode UI ran on a real phone, connected to a real
 server, driven through its own interface:
@@ -161,9 +195,13 @@ meant four defects away from functioning. That distinction is already in
 
 ## Recommended next session
 
-**M6 — `prompts/06_LOCAL_RUNTIME_SPIKE.md`.**
+**Reconnect the phone and run the two outstanding checks first** — they are
+minutes of work and one of them could change the runtime decision:
 
-M5's blocker is M6's premise: a server on the device at `http://127.0.0.1:<port>`
-is the one shape mixed content does *not* block, and the transport it depends on —
-SSE over fetch in the WebView — is now known to work. The checkpoint has served its
-purpose.
+```
+bash spike/m6/run-on-device.sh      # finishes the M6 proof
+```
+
+Then **M7 — `prompts/07_LOCAL_RUNTIME_INTEGRATION.md`**, which is where the
+runtime gets packaged into the APK as `lib*.so`, started from a foreground
+service, and pointed at by the same `ServerConnection` the app already uses.
