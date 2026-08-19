@@ -18,7 +18,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | **the app starts its own server on device** |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | **projects and Git on device; terminals deferred (ADR-0025)** |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | **in progress — 8/10 device checks pass; 2 need a provider credential** |
-| M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | **in progress — threat review done, 3 findings fixed; `auth.json` and the session DB deferred with reasons** |
+| M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | **in progress — threat review done, 3 findings fixed + 2 documented; `auth.json`, config hardening and the session DB deferred with reasons** |
 | M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | not started |
 
 `docs/CURRENT_STATUS.md` is authoritative for status. This table is a summary.
@@ -387,6 +387,12 @@ the project real.
 - A stale extracted runtime could survive an upgrade (ADR-0029) — which also
   invalidated an M9 measurement, corrected in `docs/LIFECYCLE.md` §4.
 - Seven new APK-level CI gates, three of them mutation-tested.
+- **The network security config does not constrain the server process**
+  (`docs/SECURITY.md` §5). Demonstrated on hardware. It binds the Android HTTP
+  stack only, so the cleartext gates say nothing about provider calls.
+- **Config is a trusted input the agent can write** (§4): `{file:}` interpolation
+  into remote-config headers plus `plugin` loading make it an exfiltration and
+  persistence channel. Persistence, not escalation.
 
 ---
 

@@ -37,7 +37,7 @@ can a malicious repository or prompt get, and what leaves the device.
 | Session database | `filesDir/opencode/.local/share/opencode/*.db` | app sandbox only | **VERIFIED** |
 | Project files | `filesDir/projects/<slug>` | app sandbox only | **VERIFIED** |
 | Runtime binaries | `nativeLibraryDir` (read-only, W^X) | APK signature | **VERIFIED** |
-| Runtime JS bundle | `filesDir/runtime` | app sandbox; re-extracted per install | **VERIFIED** — §7 |
+| Runtime JS bundle | `filesDir/runtime` | app sandbox; re-extracted per install | **VERIFIED** — §8 |
 
 Every one of these is inside the app sandbox. Measured: no file under `files/`
 or `shared_prefs/` is readable outside the app's uid, and `allowBackup="false"`
@@ -95,7 +95,64 @@ different trade rather than a clear win, and it deserves its own ADR.
 
 ---
 
-## 4. The local loopback server
+## 4. OpenCode config
+
+The config file is `filesDir/opencode/.config/opencode/opencode.jsonc`, mode
+`0600`, inside the sandbox. On a fresh install it holds a `$schema` line and
+nothing else — **VERIFIED** on the device.
+
+What matters is not what it contains today but what it is *able* to do, because
+the agent can write it.
+
+**It can carry secrets.** Any config string supports `{env:VAR}` and
+`{file:path}` substitution (`packages/opencode/src/config/variable.ts`). So a
+value can interpolate an environment variable or the contents of any file the app
+can read — `auth.json` included.
+
+**It can fetch remote config, with credential headers.** A config entry may name
+a `url` plus `headers`, both substituted as above
+(`substituteWellKnownRemoteConfig`). That is an outbound request the app makes on
+startup, to a host named in a file the agent can write.
+
+**It can load plugins**, which is arbitrary code in the server process
+(`config.plugin`, path-like specs resolved relative to the declaring file). There
+are no shell hooks — `experimental` carries policies only — so `plugin` is the
+code-execution field.
+
+Chained, those give a concrete attack: a malicious prompt writes a config whose
+remote-config header is `{file:…/auth.json}`, and the next start posts the
+provider keys to an attacker's host.
+
+**This is persistence, not escalation.** The agent already reads files and makes
+network requests by design; nothing here grants it a capability it lacked. What
+config adds is *durability* — the behaviour survives restart and is not visible
+in any transcript — and a quieter channel than an obvious tool call.
+
+Consequences, taken seriously:
+
+- Config is a **trusted input** to the server, and the agent can write it. Any
+  future "review what the agent changed" feature should treat
+  `opencode.jsonc` as security-relevant, not as ordinary project noise.
+- It is one of the reasons the network security config's scope (§5) matters.
+
+Not mitigated in M10. Doing so means constraining what the server accepts from
+its own config file, which is upstream behaviour, not app behaviour — the same
+A1 boundary as `auth.json` (§3). Recorded here rather than silently accepted.
+
+Measured on the device, since "the agent can write it" is the load-bearing claim:
+
+| Path | Writable by the app? |
+|---|---|
+| `opencode.jsonc` | **yes** |
+| extracted runtime bundle (`files/runtime/launch.mjs`) | **yes** |
+| runtime binaries (`nativeLibraryDir/libnode.so`) | **no** — W^X holds |
+
+The last row is the one that must never change, and is now pinned by
+`SandboxPostureTest`.
+
+---
+
+## 5. The local server, and the limits of the network policy
 
 | Property | Evidence | State |
 |---|---|---|
@@ -108,9 +165,53 @@ Loopback is shared by every app on the device, which is exactly why the password
 is not optional. An unauthenticated loopback server would be a local privilege
 escalation for any installed app.
 
+### The network security config does not constrain the server
+
+Requirement 6 asks for a review of the network security configuration. Reviewing
+it turned up something that changes how its guarantees should be read.
+
+Android's network security config is enforced by the **Android** HTTP stack —
+WebView, `HttpURLConnection`, OkHttp, Cronet. The OpenCode server is a separate
+native process with its own bundled OpenSSL, and it never consults that policy.
+
+Demonstrated rather than argued. A debug APK was built with the *release*
+(restrictive) policy — `cleartextTrafficPermitted=false` for everything except
+loopback — installed, and the bundled Node asked to fetch a public host over
+plain HTTP:
+
+```
+$ aapt2 dump xmltree --file res/xml/network_security_config.xml app-debug.apk
+    E: base-config
+      A: cleartextTrafficPermitted=false        <- cleartext denied
+
+$ adb shell run-as ai.opencode.android … libnode.so -e 'http.get(…)'
+NODE cleartext status: 204                      <- sent anyway
+```
+
+(Two earlier attempts returned `ENOTFOUND` and `ETIMEDOUT`. Those were the app
+being idle, not the policy: Android restricts network for a stopped app. With the
+app running, the request succeeds — which is what makes the result attributable.)
+
+So, precisely:
+
+- **What the policy does cover:** the WebView, and any HTTP the Kotlin side
+  makes. That is what the release build and the CI gate in §13 protect.
+- **What it does not cover:** every request the server makes — provider API
+  calls, remote config fetches (§4), plugin downloads. Those are governed by
+  upstream's own TLS handling, not by Android.
+
+This is not a defect introduced here, and it is not fixable with a config file;
+it is a property of running a native server. It is written down because
+"release denies cleartext" is otherwise easy to read as "this app cannot send
+cleartext", and that is false. **VERIFIED.**
+
+The practical mitigation is that provider endpoints are HTTPS by upstream default
+and TLS verification is untouched anywhere in this project. What is unguarded is a
+config that deliberately names an `http://` URL — see §4.
+
 ---
 
-## 5. Exported components, intents and deep links
+## 6. Exported components, intents and deep links
 
 Enumerated from the **merged** manifest, not the source:
 
@@ -137,7 +238,7 @@ Intent is not a second tap. Five unit tests cover it.
 
 ---
 
-## 6. The WebView, and the CSP added in M10
+## 7. The WebView, and the CSP added in M10
 
 The WebView is the largest attack surface, because the bridge behind it can read
 the encrypted store, the clipboard and draft blobs — and the UI renders text the
@@ -194,7 +295,7 @@ app's own code. A test asserts the packaged document still yields a hash.
 
 ---
 
-## 7. Runtime binaries and updates
+## 8. Runtime binaries and updates
 
 **Nothing is downloaded at runtime.** Every executable and every line of server
 JavaScript ships inside the signed APK; the only outbound HTTP the app itself
@@ -234,7 +335,7 @@ turn. Re-extraction on every install limits how long a modification survives.
 
 ---
 
-## 8. Git credentials
+## 9. Git credentials
 
 The app bundles `git` and configures it for a device with no passwd entry:
 `GIT_CONFIG_NOSYSTEM=1`, `GIT_ATTR_NOSYSTEM=1`, and a seeded `.gitconfig` with a
@@ -243,7 +344,7 @@ default identity.
 **No credential helper is configured, and no Git credentials are stored.**
 **VERIFIED** by grep. Remote operations over HTTPS would prompt or fail rather
 than persist anything. `git-remote-https` is present so an https remote resolves
-at all (M8), but authenticated push was never exercised — see §11.
+at all (M8), but authenticated push was never exercised — see §12.
 
 When Git credential storage is added it must go through `PreferenceStore` (the
 Keystore-backed path), not through Git's own `store` helper, which writes
@@ -251,7 +352,7 @@ plaintext to `~/.git-credentials`.
 
 ---
 
-## 9. Logging and crash diagnostics
+## 10. Logging and crash diagnostics
 
 `SafeLog` redacts at the logging boundary rather than trusting call sites:
 `key=value` and `key: value` for password/token/secret/apikey, whole
@@ -273,7 +374,7 @@ today; nothing prevents it either.
 
 ---
 
-## 10. Project files and content URIs
+## 11. Project files and content URIs
 
 Projects are app-private directories with real POSIX paths (ADR-0024). The
 Storage Access Framework provides `content://` URIs for import only, and the
@@ -293,22 +394,24 @@ tree grants would be a broader permission than the work needs.
 
 ---
 
-## 11. Residual risks
+## 12. Residual risks
 
 Ordered by how much they should worry you.
 
 | # | Risk | Why it remains | Mitigation |
 |---|---|---|---|
 | 1 | **Provider API keys are plaintext on disk** | Upstream writes `auth.json`; encrypting it means forking the auth path (§3) | App sandbox, no backup, non-debuggable release |
-| 2 | **A rooted or unlocked-with-adb device exposes everything** | Inherent — the app must decrypt without user interaction to run a background turn | None; document it |
-| 3 | **The agent can modify its own runtime bundle** | It executes code by design (§7) | Re-extraction on every install |
-| 4 | **`connect-src https:`** | Remote-server mode needs a host unknown at build time (§6) | Tighten when remote mode retires |
-| 5 | **`style-src 'unsafe-inline'`** | Upstream's theme preload injects varying CSS (§6) | CSS cannot reach the bridge |
-| 6 | **Debug builds permit cleartext to any host and enable WebView debugging** | Deliberate, for a LAN dev server (ADR-0018) | CI asserts release differs; both checked in `verify-apk.sh` |
-| 7 | **`SafeLog` redaction is regex-shaped** | A bare secret with no key would pass through (§9) | No call site does this today |
-| 8 | **No R8/shrinking in release** | Deferred to M11 so rules can be written against real code | Not a confidentiality control |
-| 9 | **Release APK is unsigned** | No keystore exists yet; signing is a release concern | M11 |
-| 10 | **Git push with credentials never exercised** | Needs a real remote and a token | §8 |
+| 2 | **Config is a trusted input the agent can write** | `{file:}` interpolation into remote-config headers, plus `plugin` code loading, make it an exfiltration *and* persistence channel (§4) | None; constraining it is upstream behaviour |
+| 3 | **A rooted or unlocked-with-adb device exposes everything** | Inherent — the app must decrypt without user interaction to run a background turn | None; document it |
+| 4 | **The network security config does not cover the server** | The server is a native process with its own OpenSSL; the policy binds the Android stack only (§5) | Providers are HTTPS by upstream default; TLS verification untouched |
+| 5 | **The agent can modify its own runtime bundle** | It executes code by design (§8) | Re-extraction on every install |
+| 6 | **`connect-src https:`** | Remote-server mode needs a host unknown at build time (§7) | Tighten when remote mode retires |
+| 7 | **`style-src 'unsafe-inline'`** | Upstream's theme preload injects varying CSS (§7) | CSS cannot reach the bridge |
+| 8 | **Debug builds permit cleartext to any host and enable WebView debugging** | Deliberate, for a LAN dev server (ADR-0018) | CI asserts release differs; both checked in `verify-apk.sh` |
+| 9 | **`SafeLog` redaction is regex-shaped** | A bare secret with no key would pass through (§10) | No call site does this today |
+| 10 | **No R8/shrinking in release** | Deferred to M11 so rules can be written against real code | Not a confidentiality control |
+| 11 | **Release APK is unsigned** | No keystore exists yet; signing is a release concern | M11 |
+| 12 | **Git push with credentials never exercised** | Needs a real remote and a token | §9 |
 
 Not risks, though they look like ones:
 
@@ -319,7 +422,7 @@ Not risks, though they look like ones:
 
 ---
 
-## 12. What CI now enforces
+## 13. What CI now enforces
 
 `scripts/ci/verify-apk.sh` gates the APK — the only artifact that reflects what
 actually ships. Added in M10, each mutation-tested by deliberately breaking the
@@ -336,12 +439,16 @@ property and confirming the check fails:
 | **The cleartext exception is loopback-only** | — |
 | The packaged launcher does not bind `0.0.0.0` | — |
 
+**Read the cleartext gates with §5 in mind.** They assert what the *Android*
+stack will do. They say nothing about the server process, which is outside that
+policy entirely.
+
 `aapt2` is now located inside the SDK when it is not on `PATH`. Without that
 these checks degraded to warnings, which reads like a pass and is not one.
 
 ---
 
-## 13. Test coverage for security-sensitive helpers
+## 14. Test coverage for security-sensitive helpers
 
 | Helper | Tests |
 |---|---|
@@ -353,13 +460,17 @@ these checks degraded to warnings, which reads like a pass and is not one.
 | `RuntimeAssets` | 6 tests — re-extract on new install, no re-extract when unchanged, the same-version-name case that failed |
 | `ProjectStore.slug` / `ProjectImport.safeName` | traversal, separators, unicode, truncation |
 | Network security config | contents pinned, both build types |
+| **Sandbox posture** (instrumented) | 4 tests — runtime binaries and `nativeLibraryDir` not writable (W^X), app storage not readable or writable by other apps, written files not world-accessible |
 
 ---
 
-## 14. Not done
+## 15. Not done
 
 - **Encrypting `auth.json`** (§3). The largest remaining item, deferred with a
   written reason and a concrete proposal rather than silently.
+- **Constraining what config may do** (§4) — `{file:}` interpolation into remote
+  request headers, and `plugin` loading. Both are upstream behaviour; limiting
+  them is an upstream conversation, not an app patch.
 - **A live penetration test** — no attempt was made to install a second app on
   the device and probe the exported Activity or loopback port from it. The
   properties were established by reading the merged manifest and by socket and

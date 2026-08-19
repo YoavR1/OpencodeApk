@@ -9,7 +9,7 @@
 | **Last updated** | 2026-08-20 |
 | **Session** | M10 security and credential storage |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M10 — threat review complete; 3 findings fixed; provider-key encryption deferred with a written reason** |
+| **Current milestone** | **M10 — threat review complete; 3 findings fixed, 2 more documented; provider-key encryption deferred with a written reason** |
 | **Next milestone** | **M11 — polish and release** |
 | **Next prompt** | **`prompts/11_*.md`** |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
@@ -19,9 +19,11 @@
 
 ---
 
-## M10: a threat review, and three things it found
+## M10: a threat review, and five things it found
 
-Full review in **`docs/SECURITY.md`**. Summary of what changed.
+Full review in **`docs/SECURITY.md`**. Three were fixed; two are properties
+of the design that are documented rather than patched, because changing them
+means changing upstream.
 
 ### 1. The WebView had no Content-Security-Policy
 
@@ -70,6 +72,46 @@ from any Intent to the renderer as a `notification.clicked` event, firing a
 callback the UI had registered. Any app could send it. Tags are now checked
 against the ones this process actually posted, and consumed on use — so a
 replayed Intent is not a second tap either. ADR-0030.
+
+### 4. The network security config does not cover the server
+
+Reviewing requirement 6 turned up something that changes how the policy should be
+read. Android's network security config binds the **Android** HTTP stack —
+WebView, `HttpURLConnection`. The OpenCode server is a separate native process
+with its own bundled OpenSSL and never consults it.
+
+Demonstrated rather than argued: a debug APK was built with the *release*
+restrictive policy (`cleartextTrafficPermitted=false` except loopback), installed,
+and the bundled Node asked to fetch a public host over plain HTTP:
+
+```
+A: cleartextTrafficPermitted=false      <- the installed policy
+NODE cleartext status: 204              <- sent anyway
+```
+
+Two earlier attempts returned `ENOTFOUND`/`ETIMEDOUT` — that was the app being
+idle, not the policy, which the control (app running) rules out.
+
+So "release denies cleartext" is true of the WebView and the Kotlin side, and
+says nothing about provider calls or remote config fetches. Not a defect
+introduced here and not fixable with a config file; written down because the
+opposite reading is the natural one. `docs/SECURITY.md` §5.
+
+### 5. OpenCode config is a trusted input the agent can write
+
+Config supports `{env:VAR}` and `{file:path}` substitution, can fetch remote
+config with credential headers, and can load plugins (arbitrary code). Chained:
+a malicious prompt writes a config whose remote-config header is
+`{file:…/auth.json}`, and the next start posts the provider keys elsewhere.
+
+This is **persistence, not escalation** — the agent already reads files and makes
+network requests by design. What config adds is durability across restarts and a
+channel that appears in no transcript. Measured: `opencode.jsonc` and the
+extracted bundle are writable; the runtime **binaries** are not, and that W^X
+invariant is now pinned by `SandboxPostureTest`.
+
+Constraining what config may do is upstream behaviour, so it is documented rather
+than patched — `docs/SECURITY.md` §4.
 
 ### Verified on the device
 

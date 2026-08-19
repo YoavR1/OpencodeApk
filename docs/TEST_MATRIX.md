@@ -140,6 +140,7 @@ Fast, no device. Run by `./gradlew test`.
 ## Layer 2 — Android instrumented tests (`src/androidTest/`)
 
 Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
+**25 tests**, all passing on a OnePlus 15 (Android 16).
 
 | Area | Test | Milestone | Status |
 |---|---|---|---|
@@ -149,6 +150,10 @@ Require a device or emulator. Run by `./gradlew connectedAndroidTest`.
 | Runtime | The app can launch a shell command | M6 | ✅ **passed on device** |
 | Runtime | **An executable shipped as a jniLib runs from `nativeLibraryDir`** | M6 | ✅ **passed on device** |
 | Runtime | **An executable in `filesDir` cannot be run — W^X** | M6 | ✅ **passed on device** |
+| Security | Runtime binaries are not writable (the other half of W^X) | M10 | ✅ |
+| Security | `nativeLibraryDir` does not accept new files | M10 | ✅ |
+| Security | App storage is not readable or writable by other apps | M10 | ✅ mode `rwxrwx--x` — others traverse only |
+| Security | Files the app writes are not world-accessible | M10 | ✅ |
 | Runtime | The app can bind a loopback port | M6 | ✅ **passed on device** |
 | Runtime | The app can read and write its own storage | M6 | ✅ **passed on device** |
 | Runtime | The app is not running as root | M6 | ✅ **passed on device** |
@@ -326,6 +331,9 @@ Some things only a human with a phone can confirm. Record results in
 | Stored values are opaque on disk | M10 | ✅ ciphertext in `shared_prefs/*.xml` |
 | No secret appears in logcat | M10 | 🟡 0 matches, but this OEM suppresses third-party logs |
 | The device runs the runtime the APK shipped | M10 | ✅ was stale before the fix; `2` after |
+| **The network security config does NOT constrain the server** | M10 | ✅ restrictive policy installed, Node still reached a public host over cleartext (204) |
+| OpenCode config is writable by the agent | M10 | ✅ persistence/exfiltration vector, documented |
+| Runtime binaries are not writable (W^X) | M10 | ✅ `SandboxPostureTest` |
 
 ---
 
