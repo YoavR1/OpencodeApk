@@ -1400,3 +1400,50 @@ the selector, not to patch upstream components.
 Verified on the device after shipping it: `overflowY=auto`, 555 px of content in
 323 px, and the previously unreachable 232 px scrolled into view.
 
+---
+
+## ADR-0034 — The app runs fullscreen, with transient bars on swipe
+
+**Status:** accepted (M11)
+
+### Context
+
+The window was already edge-to-edge, but the status and navigation bars were
+still drawn, costing two permanent strips of a screen this app spends entirely on
+dense text — a diff, a file, a long answer.
+
+### Decision
+
+`MainActivity` hides the system bars and sets
+`BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`, so a swipe from either edge brings them
+back over the content for a few seconds and they leave again on their own.
+Nothing is taken away, and the app never has to decide when to restore them.
+
+This is **not** a second layout mode. It is the same edge-to-edge window with the
+bars hidden, which is why the existing inset listener needed no special case: the
+bars' insets become zero and the content grows into the space.
+
+The display cutout is deliberately **not** included in that. A notch is still
+physically opaque, and drawing text under it would be unreadable rather than
+immersive — so cutout insets continue to be applied on devices that report them.
+
+`onWindowFocusChanged` re-hides the bars when the window returns to the
+foreground. The system restores them after a permission dialog, a share sheet,
+the recents switcher or an unlock; without this the app comes back from any of
+those with the bars stuck on, which reads as the setting having stopped working.
+
+### Consequences
+
+Measured on a OnePlus 15: the WebView viewport is 363×792 CSS px at dpr 3.5 —
+**2772 device pixels, the full display height** — and the window manager reports
+`app=1272x2772` equal to `cur`, so no bars are reserved.
+
+The two things immersive mode usually breaks were checked rather than assumed:
+
+- **The keyboard.** The IME still insets correctly and content is not left
+  underneath it. The reported keyboard height stays correct because
+  `ime.bottom - bars.bottom` still holds when `bars.bottom` is zero — the IME
+  occupies from the true bottom of the screen.
+- **Returning from elsewhere.** After Home and after the recents switcher, the
+  window is still `1272x2772`.
+

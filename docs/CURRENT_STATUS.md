@@ -106,6 +106,25 @@ checkout), deletes it with `if: always()`, and runs `apksigner verify` afterward
 rather than assuming the environment took effect. With no secrets set it stays
 unsigned, so forks and pull requests still build green.
 
+### Fullscreen
+
+The app now hides the system bars and uses the whole display. Measured: the
+WebView viewport is 363×792 CSS px at dpr 3.5 — **2772 device pixels, the full
+screen height** — and the window manager reports `app=1272x2772`, equal to `cur`,
+so nothing is reserved for bars.
+
+A swipe from either edge brings them back transiently, so nothing is taken away.
+This is the same edge-to-edge window with the bars hidden rather than a second
+layout mode, which is why the inset listener needed no special case — their
+insets simply become zero. Display cutouts are still respected: a notch is opaque
+whatever the app wants.
+
+The two things immersive mode usually breaks were checked rather than assumed:
+the keyboard still insets correctly with content above it, and the bars stay
+hidden after Home and after the recents switcher (`onWindowFocusChanged`
+re-applies, because the system restores them after dialogs and app switches).
+ADR-0034.
+
 ### What is NOT done
 
 - **A keystore for this project.** Four secrets turn CI signing on

@@ -49,7 +49,17 @@ To do anything useful you then need:
 2. **A project** — tap *Open project* or *Add project*. You can create an empty
    project or import a folder from your device.
 
-## 4. What works
+## 4. Fullscreen
+
+The app hides the status and navigation bars and uses the whole screen.
+
+**Swipe from the top or bottom edge** to bring them back for a few seconds — to
+check the time or the battery, or to use the gesture bar. They hide again on
+their own; there is nothing to dismiss.
+
+The back gesture works normally throughout.
+
+## 5. What works
 
 - Running a full OpenCode server on the device, on loopback, with authentication
 - Creating and resuming sessions; sessions survive the app being closed
@@ -59,18 +69,18 @@ To do anything useful you then need:
 - Continuing an agent turn while the app is in the background
 - Connecting to a **remote** OpenCode server instead, if you prefer
 
-## 5. Known limitations
+## 6. Known limitations
 
 | | |
 |---|---|
 | **No terminal** | There is no interactive shell or PTY. Commands the agent runs work; you cannot type into one yourself (ADR-0025). |
-| **Landscape on small screens** | The layout is designed portrait-first. Landscape works, but at large system font sizes some cards clip text — see §7. |
+| **Landscape is tight** | The layout is portrait-first. Landscape works and scrolls correctly at any font size, but a short screen shows much less at once. |
 | **Memory** | The server is a real Node process using ~380 MB. On a phone under memory pressure Android may kill it; the app restarts it, but an in-flight turn is lost. |
 | **Remote servers must be HTTPS** | A plain-`http://` server on your LAN cannot be reached from the app's secure origin. Use HTTPS or a tunnel (ADR-0021). |
 | **Provider keys are stored unencrypted** | They sit in the app's private storage, readable only by this app on an unrooted device — but not encrypted. See `docs/SECURITY.md` §3. |
 | **arm64 only** | See §1. |
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 **The dot is red, or it says it cannot reach the server.**
 The runtime failed to start or died. The app restarts it automatically within
@@ -83,9 +93,11 @@ holds a foreground service with a visible notification, which protects it; if
 that notification is not showing, the app did not think work was in flight.
 Reopen the app — your session and project are on disk and will come back.
 
-**Everything is huge, or cut off.**
-The app follows your system font size. At the largest sizes in landscape, some
-cards clip. Rotate to portrait, or reduce *Settings → Display → Font size*.
+**Everything is huge.**
+The app follows your system font size, including the largest settings. Content
+stays reachable — panes scroll and button rows wrap — but a landscape screen at
+2× text shows very little at once. Rotate to portrait, or reduce
+*Settings → Display → Font size*.
 
 **Git says it cannot find my identity.**
 The app writes a default one (`OpenCode <opencode@localhost>`) the first time.
@@ -102,7 +114,7 @@ adb logcat -s OpenCode:V
 Some phone makers (OnePlus/Oplus among them) suppress third-party app logs from
 `logcat` by default, so this may show nothing even when the app is logging.
 
-## 7. Privacy and data
+## 8. Privacy and data
 
 - Everything lives in the app's private storage. Nothing is backed up to the
   cloud or transferred to a new device — `allowBackup` is off.
@@ -112,7 +124,7 @@ Some phone makers (OnePlus/Oplus among them) suppress third-party app logs from
   which is the point of the app.
 - The full threat review is `docs/SECURITY.md`.
 
-## 8. Open source
+## 9. Open source
 
 OpenCode for Android bundles Node.js, Git, ICU, OpenSSL, curl, SQLite and others,
 and redistributes them under their own licences — including **GPL-2.0** (Git) and

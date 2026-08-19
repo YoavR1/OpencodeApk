@@ -9,7 +9,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -109,6 +111,7 @@ class MainActivity : AppCompatActivity() {
         requestNotificationPermissionOnce()
 
         applyInsets()
+        applyFullscreen()
         registerBackHandling()
 
         if (savedInstanceState == null) {
@@ -117,6 +120,48 @@ class MainActivity : AppCompatActivity() {
         } else {
             webView.restoreState(savedInstanceState)
         }
+    }
+
+    /**
+     * Hides the status and navigation bars.
+     *
+     * A phone screen is small and this app spends its time on dense text - a diff,
+     * a file, a long answer. The system bars cost two strips of it permanently,
+     * for a clock and a gesture hint the user already knows how to summon.
+     *
+     * `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` is what keeps this usable rather
+     * than hostile: a swipe from either edge brings the bars back over the
+     * content for a few seconds and they leave again on their own. Nothing is
+     * taken away, and the app never has to guess when to restore them.
+     *
+     * This is not a separate mode from the edge-to-edge layout above; it is the
+     * same window with the bars hidden. The inset listener needs no special case:
+     * with the bars gone their insets are zero, so the content simply grows into
+     * the space. The display cutout is *not* included in that - a notch is still
+     * physically opaque, and drawing text under it would be unreadable rather
+     * than immersive.
+     */
+    private fun applyFullscreen() {
+        WindowCompat.getInsetsController(window, webView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    /**
+     * Re-hides the bars when the window comes back to the foreground.
+     *
+     * The system restores them on its own after a permission dialog, a share
+     * sheet, the recents switcher or an unlock. Without this the app comes back
+     * from any of those with the bars stuck on, which looks like the setting
+     * stopped working.
+     *
+     * Only when focus is actually gained: asking to hide while losing focus
+     * fights whatever is taking over the screen.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreen()
     }
 
     /**

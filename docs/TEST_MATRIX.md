@@ -344,6 +344,9 @@ Some things only a human with a phone can confirm. Record results in
 | Landscape at 1.5× font: onboarding card buttons | M11 | ✅ **fixed** — was 316 px of buttons in 262 px; they now wrap |
 | **The release APK is bit-for-bit reproducible** | M11 | ✅ two clean builds, identical sha256 (`scripts/ci/check-reproducible.sh`) |
 | Every bundled library ships its full licence text | M11 | ✅ 12 texts for 16 libraries; no warnings |
+| **Fullscreen: the app gets the whole display** | M11 | ✅ viewport 792 CSS px × dpr 3.5 = 2772 device px; `app=1272x2772` == `cur` |
+| Fullscreen survives Home and the recents switcher | M11 | ✅ still `1272x2772` after both |
+| The keyboard still insets correctly in fullscreen | M11 | ✅ `mInputShown=true`, content above the IME, bars stay hidden |
 | **The network security config does NOT constrain the server** | M10 | ✅ restrictive policy installed, Node still reached a public host over cleartext (204) |
 | OpenCode config is writable by the agent | M10 | ✅ persistence/exfiltration vector, documented |
 | Runtime binaries are not writable (W^X) | M10 | ✅ `SandboxPostureTest` |
