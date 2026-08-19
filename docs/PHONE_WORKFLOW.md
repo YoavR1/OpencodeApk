@@ -57,6 +57,35 @@ GitHub's mobile web and the GitHub mobile app are both workable:
 These are **debug** builds, signed with the standard Android debug key. That is
 fine for testing and cannot be published.
 
+## Debugging on the device
+
+**A cloud session cannot reach your phone.** It runs in an isolated container —
+no USB passthrough, no route to your LAN — so `adb` there lists nothing however
+the phone is plugged in. The phone is connected to *your* machine, which is a
+different computer from the one the session runs on. Anything device-side has to
+run on your side.
+
+Most of what the sessions need does not require any tooling: whether the UI
+appears, whether a reply streams in, whether an error message is clear. Those are
+observations, and reporting them in a sentence is worth more than a log.
+
+When something fails *invisibly* — a blank screen, a request that goes nowhere —
+`scripts/dev/capture-device-log.sh` collects what the session cannot see:
+
+```
+scripts/dev/capture-device-log.sh [path/to/app-debug.apk] [seconds]
+```
+
+It installs the APK, launches it, captures WebView console output and crashes for
+90 seconds, redacts anything credential-shaped, and writes a `device-report-*.log`
+to paste back. WebView console output is where a blocked CORS preflight appears
+and nowhere else, which is the most likely silent failure in remote-server mode.
+
+It needs `adb`, which means a computer, or a shell on the phone itself with
+Android's wireless debugging enabled. If you have neither, skip it — answer the
+questions in `docs/CURRENT_STATUS.md` instead and that will usually be enough to
+tell the next session where to look.
+
 ## Reporting device results
 
 Device evidence is the one thing a cloud session cannot produce. When you test on
