@@ -1277,3 +1277,126 @@ own callback — but the fix costs nothing and removes the question. Consuming o
 use also means a replayed Intent is not a second tap, which was a real bug
 independent of the security framing.
 
+---
+
+## ADR-0031 — Release signing comes from the environment, and never falls back
+
+**Status:** accepted (M11)
+
+### Context
+
+A release APK must be signed, and the signing material must never enter the
+repository (`.claude/rules/quality.md` Q8). The convenient thing for a build
+system to do when signing is not configured is to fall back to the debug key, so
+that `assembleRelease` always produces something installable.
+
+### Decision
+
+Signing material is read from `OPENCODE_KEYSTORE`, `OPENCODE_KEYSTORE_PASSWORD`,
+`OPENCODE_KEY_ALIAS` and `OPENCODE_KEY_PASSWORD`. When they are absent the
+release build is **unsigned**. It never falls back to the debug key.
+
+When `OPENCODE_KEYSTORE` is set but does not point at a file, the build fails
+rather than quietly producing an unsigned APK — configured-but-wrong is a mistake
+worth stopping for.
+
+v1 (JAR) signing is disabled; `minSdk` 26 means every supported device
+understands v2/v3, and v1 is the weaker scheme.
+
+### Consequences
+
+A debug-signed "release" is the dangerous outcome, not the unsigned one: it
+installs, it looks finished, and it can never be upgraded by a properly signed
+build because Android refuses an update whose signature differs. Being unsigned
+fails loudly at install time; being debug-signed fails months later, permanently.
+
+CI builds the release variant unsigned, so the release path stays verified on
+every push without signing secrets being needed to keep the build green.
+
+---
+
+## ADR-0032 — The release build gates the channel and the attribution
+
+**Status:** accepted (M11)
+
+### Context
+
+Two defects reached a device in M11 that no test could have caught, because both
+are properties of the packaged artifact rather than of the source:
+
+1. Upstream defaults `OPENCODE_CHANNEL` to `"dev"` (`packages/app/vite.js`). The
+   release APK shipped with a **DEV badge** in the titlebar. It was found by
+   looking at a screenshot, not by any check.
+2. The APK redistributes sixteen third-party native libraries, two of them
+   copyleft, with no generated notice.
+
+Both fail silently and in the worst way — a development build on a store listing,
+or a licence violation.
+
+### Decision
+
+`assembleRelease` and `bundleRelease` depend on two gates:
+
+- **`verifyReleaseChannel`** reads `build-info.json`, emitted by a vite plugin in
+  `packages/android/vite.config.ts`, and fails unless the channel is `prod` or
+  `beta`. A bundle with no marker counts as dev: "unknown" and "not built for
+  release" are the same risk. The channel has to be recorded in a file because
+  vite bakes it in via `define`, so it cannot be read back once the minifier has
+  folded the comparisons away.
+- **`verifyAttribution`** runs `scripts/runtime/collect-licenses.py --check`,
+  which fails when a packaged library has no licence entry or when `NOTICE.txt`
+  is stale.
+
+Debug builds are exempt from both: a debug build is *expected* to be dev-channel,
+and blocking local iteration on attribution would be noise.
+
+### Consequences
+
+`bun run --cwd packages/android build` and `build:release` now differ, and the
+difference is enforced rather than remembered. Both gates were verified by
+breaking the property and watching the release build stop.
+
+---
+
+## ADR-0033 — The main content pane scrolls on short viewports
+
+**Status:** accepted (M11)
+
+### Context
+
+Upstream gives the main content pane `overflow-hidden` and sizes it to the
+viewport. That is correct on a desktop window, which is never short.
+
+A phone in landscape is short. Measured at 792x363 CSS px with the system font
+scale at 1.5, the pane held **555 px of content in a 323 px box** and clipped the
+rest: the onboarding card's buttons were cut through the middle, and the server
+status, "Open project" and the recent-projects list below them could not be
+reached by scrolling, rotating, or any other means.
+
+### Decision
+
+A CSS override in `packages/android/src/styles.css` sets `overflow-y: auto` on
+that pane under `@media (max-height: 480px)`.
+
+This follows the file's existing pattern for the hover-reveal rules: a responsive
+override keyed on the capability that makes upstream's assumption wrong, rather
+than a fork of the component (`.claude/rules/architecture.md` A1, and M4's
+"responsive overrides rather than wholesale forks").
+
+Deliberately **not** scoped to landscape. A large enough font scale, a
+split-screen window or a foldable's cover display reach the same state in
+portrait and fail identically.
+
+`overflow-y: auto` is inert when the content fits, so nothing changes in the
+common case; it only stops content from becoming unreachable.
+
+### Consequences
+
+Like the hover rules, this depends on upstream's class names — the selector
+identifies the pane by its inset top-left corner. If a rename silences it, the
+symptom is content unreachable on a short screen again, and the fix is to update
+the selector, not to patch upstream components.
+
+Verified on the device after shipping it: `overflowY=auto`, 555 px of content in
+323 px, and the previously unreachable 232 px scrolled into view.
+

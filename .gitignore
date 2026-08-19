@@ -71,5 +71,12 @@ apps/android/app/src/debug/jniLibs/
 apps/android/app/src/main/jniLibs/
 apps/android/app/src/main/assets/runtime/
 
+# --- Generated: open-source notices assembled into the APK ---
+#
+# Written by scripts/runtime/collect-licenses.py from the staging trees and from
+# the vendored texts in licenses/, which ARE committed. This is build output; the
+# release build regenerates and verifies it (ADR-0032).
+apps/android/app/src/main/assets/licenses/
+
 # M8 spike: git staging (scripts/runtime/termux.py)
 spike/m8/staging/

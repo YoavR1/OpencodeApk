@@ -4,6 +4,58 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// ---------------------------------------------------------------------------
+// Versioning
+//
+// One source of truth, overridable from the environment so CI can stamp a build
+// without editing a tracked file.
+//
+//   versionName  the human version, e.g. 0.1.0
+//   versionCode  must increase monotonically for every build a device may see;
+//                Android refuses to install an APK whose code is not higher.
+//
+// CI passes the run number, which is monotonic per repository. A local build
+// gets 1, which is fine because a local build is never published.
+// ---------------------------------------------------------------------------
+val appVersionName: String = (findProperty("opencode.versionName") as String?)
+    ?: System.getenv("OPENCODE_VERSION_NAME")
+    ?: "0.1.0"
+
+val appVersionCode: Int = ((findProperty("opencode.versionCode") as String?)
+    ?: System.getenv("OPENCODE_VERSION_CODE"))
+    ?.toIntOrNull()
+    ?: 1
+
+/** Signing material from the environment, or null when it is not configured. */
+data class ReleaseSigning(
+    val storePath: String,
+    val storePassword: String,
+    val keyAlias: String,
+    val keyPassword: String,
+)
+
+val releaseSigning: ReleaseSigning? = run {
+    val storePath = System.getenv("OPENCODE_KEYSTORE")
+    val storePassword = System.getenv("OPENCODE_KEYSTORE_PASSWORD")
+    val keyAlias = System.getenv("OPENCODE_KEY_ALIAS")
+    // A key password is commonly the same as the store password; accept that
+    // rather than making the caller repeat it.
+    val keyPassword = System.getenv("OPENCODE_KEY_PASSWORD") ?: storePassword
+
+    if (storePath.isNullOrBlank() || storePassword.isNullOrBlank() || keyAlias.isNullOrBlank()) {
+        null
+    } else if (!File(storePath).isFile) {
+        // Configured but wrong is a mistake worth stopping for: silently
+        // producing an unsigned APK would look like the signing worked.
+        throw GradleException(
+            "OPENCODE_KEYSTORE is set to '$storePath', which is not a file. " +
+                "See docs/RELEASE.md.",
+        )
+    } else {
+        ReleaseSigning(storePath, storePassword, keyAlias, keyPassword!!)
+    }
+}
+
 android {
     namespace = "ai.opencode.android"
     compileSdk = 37
@@ -12,10 +64,37 @@ android {
         applicationId = "ai.opencode.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-m2"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // ------------------------------------------------------------------ signing
+    //
+    // Signing material NEVER enters this repository (.claude/rules/quality.md Q8).
+    // It comes from the environment, which is a CI secret store in CI and a local
+    // keystore the developer owns otherwise. See docs/RELEASE.md.
+    //
+    // When the environment is not configured the release build is left UNSIGNED
+    // rather than falling back to the debug key. A debug-signed "release" is the
+    // dangerous outcome: it installs, it looks finished, and it can never be
+    // upgraded by a properly signed build because the signatures do not match.
+    signingConfigs {
+        if (releaseSigning != null) {
+            create("release") {
+                storeFile = file(releaseSigning.storePath)
+                storePassword = releaseSigning.storePassword
+                keyAlias = releaseSigning.keyAlias
+                keyPassword = releaseSigning.keyPassword
+
+                // v1 is off: minSdk 26 means every supported device understands
+                // v2+, and v1 (JAR signing) is the weaker scheme.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -25,11 +104,11 @@ android {
             isMinifyEnabled = false
         }
         release {
-            // R8 / shrinking is deliberately deferred to M11, where the rules can
-            // be written against real code and verified. Turning it on now would
-            // only produce rules nothing has exercised.
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -126,6 +205,110 @@ val syncSharedUi by tasks.registering(Sync::class) {
 }
 
 tasks.named("preBuild") { dependsOn(syncSharedUi) }
+
+// ---------------------------------------------------------------------------
+// Release gates (M11)
+//
+// Two things must be true of a release APK that are true of neither a debug APK
+// nor of the source tree, so neither the unit tests nor lint can check them:
+//
+//  1. the packaged UI was built for a shipping channel, and
+//  2. every third-party binary it carries is attributed.
+//
+// Both fail silently in the worst way - a DEV badge on a store build, or a
+// licence violation - so they are wired as build dependencies of the release
+// variant rather than left to a checklist.
+// ---------------------------------------------------------------------------
+val verifyReleaseChannel by tasks.registering {
+    description = "Fails a release build whose shared UI was built for the dev channel."
+    group = "verification"
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val info = webAssetsDir.file("build-info.json").asFile
+        // A bundle predating this check has no marker. Treat that as dev, since
+        // "unknown" and "not built for release" are the same risk.
+        val channel = if (info.exists()) {
+            Regex(""""channel"\s*:\s*"([a-z]+)"""").find(info.readText())?.groupValues?.get(1) ?: "unknown"
+        } else {
+            "unknown"
+        }
+
+        check(channel == "prod" || channel == "beta") {
+            """
+            |
+            |The packaged OpenCode UI was built for the '$channel' channel.
+            |
+            |Upstream defaults OPENCODE_CHANNEL to "dev", which draws a DEV badge in
+            |the titlebar and enables debug tooling. Shipping that as a release was a
+            |real M11 finding, caught only by looking at a screenshot.
+            |
+            |Rebuild the renderer for release, from the repository root:
+            |
+            |    bun run --cwd packages/android build:release
+            |
+            |See docs/RELEASE.md.
+            """.trimMargin()
+        }
+        logger.lifecycle("Shared UI channel: $channel")
+    }
+}
+
+val verifyAttribution by tasks.registering {
+    description = "Fails a release build whose bundled third-party binaries are unattributed."
+    group = "verification"
+    outputs.upToDateWhen { false }
+
+    val script = rootProject.layout.projectDirectory.file("../../scripts/runtime/collect-licenses.py")
+    val jniLibs = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
+
+    doLast {
+        // A build without the runtime ships no third-party binary and so needs
+        // no notice for one (ADR-0023).
+        if (!jniLibs.asFile.isDirectory) {
+            logger.lifecycle("No native libraries packaged; attribution not required.")
+            return@doLast
+        }
+
+        val python = listOf("python", "python3").firstOrNull { candidate ->
+            runCatching {
+                providers.exec {
+                    commandLine(candidate, "--version")
+                    isIgnoreExitValue = true
+                }.result.get().exitValue == 0
+            }.getOrDefault(false)
+        }
+        check(python != null) {
+            "python is required to verify open-source attribution; see docs/RELEASE.md"
+        }
+
+        val result = providers.exec {
+            commandLine(python, script.asFile.absolutePath, "--check")
+            isIgnoreExitValue = true
+        }
+        val output = result.standardOutput.asText.get() + result.standardError.asText.get()
+        check(result.result.get().exitValue == 0) {
+            """
+            |
+            |Open-source attribution is missing or stale:
+            |
+            |$output
+            |Regenerate it from the repository root:
+            |
+            |    python scripts/runtime/collect-licenses.py
+            |
+            |See docs/LICENSES.md.
+            """.trimMargin()
+        }
+        logger.lifecycle(output.trim())
+    }
+}
+
+// Only the release variant. A debug build is expected to be a dev-channel build,
+// and blocking local iteration on attribution would be noise.
+tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+    dependsOn(verifyReleaseChannel, verifyAttribution)
+}
 
 // ---------------------------------------------------------------------------
 // On-device runtime (M7)

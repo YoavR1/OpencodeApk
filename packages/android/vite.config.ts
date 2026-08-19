@@ -9,8 +9,39 @@ import appPlugin from "@opencode-ai/app/vite"
  * `packages/app/public` directory. Anything that diverges here is a place the
  * Android build could drift from the desktop build without anyone noticing.
  */
+/**
+ * Records which release channel this bundle was built for.
+ *
+ * Upstream resolves the channel from `OPENCODE_CHANNEL` and **defaults to
+ * "dev"** (`packages/app/vite.js`), which draws a DEV badge in the titlebar and
+ * enables debug tooling. A release APK built without setting it therefore ships
+ * looking like a development build - which is exactly what M11 found on a
+ * device.
+ *
+ * The channel is baked into the bundle by `define`, so it cannot be read back
+ * out reliably once the minifier has folded the comparisons away. Emitting it
+ * as a file means the Gradle build can *check* what it is packaging instead of
+ * assuming whoever ran the renderer build set the right variable.
+ */
+function recordChannel() {
+  const raw = process.env.OPENCODE_CHANNEL
+  const channel = raw === "dev" || raw === "beta" || raw === "prod" ? raw : raw === "latest" ? "prod" : "dev"
+  return {
+    name: "opencode-android:record-channel",
+    generateBundle(this: { emitFile: (file: { type: "asset"; fileName: string; source: string }) => void }) {
+      this.emitFile({
+        type: "asset",
+        fileName: "build-info.json",
+        // No timestamp: it would make two identical inputs produce different
+        // outputs, and reproducibility is a release requirement (docs/RELEASE.md).
+        source: JSON.stringify({ channel }, null, 2) + "\n",
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [appPlugin],
+  plugins: [appPlugin, recordChannel()],
 
   root: "src",
   publicDir: "../../app/public",

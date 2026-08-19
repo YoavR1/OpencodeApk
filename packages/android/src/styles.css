@@ -55,3 +55,34 @@ body {
     transform: none;
   }
 }
+
+/*
+ * The main content pane must scroll when it does not fit.
+ *
+ * Upstream gives that pane `overflow-hidden` and sizes it to the viewport, which
+ * is correct on a desktop window that is never short. A phone in landscape is
+ * short: measured at 792x363 CSS px with the system font scale at 1.5, the pane
+ * held 555px of content in a 323px box and simply clipped the rest. The
+ * "Getting started" card's buttons were cut through the middle, and the server
+ * status, "Open project" and the recent-projects list below them could not be
+ * reached at all - by scrolling, by rotating, or in any other way.
+ *
+ * `overflow-y: auto` is inert when the content fits, so this changes nothing in
+ * the common case; it only stops content from becoming unreachable.
+ *
+ * Scoped to short viewports because that is where the clipping was reproduced
+ * and verified. It is deliberately NOT scoped to landscape: a tall enough font
+ * scale, a split-screen window or a foldable's cover display reach the same
+ * state in portrait, and all of them fail the same way.
+ *
+ * Like the hover rules above, this depends on upstream's class names. The
+ * selector picks the pane by its inset top-left corner, which is what makes it
+ * that pane rather than any other flex column. If a rename ever silences this,
+ * the symptom is content unreachable on a short screen again; the fix is to
+ * update the selector, not to patch upstream components.
+ */
+@media (max-height: 480px) {
+  [class~="rounded-tl-[12px]"][class~="overflow-hidden"] {
+    overflow-y: auto;
+  }
+}

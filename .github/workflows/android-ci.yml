@@ -274,6 +274,27 @@ jobs:
       - name: Verify APK
         run: scripts/ci/verify-apk.sh
 
+      # The release path has gates the debug path does not: the shared UI must
+      # have been built for a shipping channel, and every bundled third-party
+      # binary must be attributed. Both were added in M11 after a dev-channel
+      # build and an unattributed library each got as far as a device.
+      #
+      # Unsigned on purpose - no signing secrets are needed to prove the release
+      # variant assembles, and CI should not require them to stay green. Signing
+      # is documented in docs/RELEASE.md and applied when a release is cut.
+      - name: Release build gates
+        run: |
+          set -euo pipefail
+          bun run --cwd packages/android build:release
+          cd apps/android
+          ./gradlew assembleRelease --no-daemon
+        env:
+          OPENCODE_VERSION_NAME: 0.1.0-ci
+          OPENCODE_VERSION_CODE: ${{ github.run_number }}
+
+      - name: Verify release APK
+        run: scripts/ci/verify-apk.sh "$(find . -name 'app-release*.apk' -path '*outputs*' | head -1)"
+
       - name: Locate debug APK
         id: apk
         if: always()

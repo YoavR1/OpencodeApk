@@ -7,15 +7,82 @@
 | | |
 |---|---|
 | **Last updated** | 2026-08-20 |
-| **Session** | M10 security and credential storage |
+| **Session** | M11 polish and release engineering |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M10 — threat review complete; 3 findings fixed, 2 more documented; provider-key encryption deferred with a written reason** |
-| **Next milestone** | **M11 — polish and release** |
-| **Next prompt** | **`prompts/11_*.md`** |
+| **Current milestone** | **M11 — a signed release APK runs standalone on hardware; 3 findings fixed; CI signing and one layout gap open** |
+| **Next milestone** | **A real agent turn — the last unverified core claim** |
+| **Next prompt** | — |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
 > needs no external server. This is not project completion.
+
+---
+
+## M11: it is a real, installable Android application
+
+A **signed release APK**, R8-shrunk, cleanly installed on a OnePlus 15, starts
+its own OpenCode server and connects to it with no PC and no external server.
+
+| | |
+|---|---|
+| Cold start | **234 ms** (`am start -W`, `LaunchState: COLD`) |
+| App launch → server answering | **~2.8 s** (2829 / 2820 ms over two runs) |
+| Release APK | **57.7 MB** (R8 + resource shrinking took 24.8 MB off the debug build's 82.5) |
+| Release AAB | 58.5 MB |
+| App memory | 120 MB PSS |
+| Runtime memory | **382 MB PSS** — the number to watch |
+| Clean install | uninstall → install → launch: runtime up, server 401, UI connected |
+| In-place upgrade | versionCode 11 → 12 with no uninstall; session and project intact |
+
+Full numbers and the build/signing procedure: **`docs/RELEASE.md`**.
+
+### Three findings
+
+**1. A DEV badge shipped in the release build.** Upstream defaults
+`OPENCODE_CHANNEL` to `"dev"` (`packages/app/vite.js`), which draws a badge in
+the titlebar and enables debug tooling. Nothing checked, and nothing else about
+the build looked wrong — it was found by *looking at a screenshot*. There is now
+a `build:release` script, a recorded channel, and a Gradle gate that fails the
+release build on a dev bundle (ADR-0032).
+
+**2. Sixteen third-party libraries shipped with no attribution**, two of them
+copyleft: **Git is GPL-2.0** and **GNU libiconv is LGPL-2.1**. Git runs as a
+separate process so the app is not a derivative work, but redistributing the
+binaries still obliges us to ship the licence text and offer source.
+`docs/LICENSES.md` has the analysis; `collect-licenses.py` generates the notice
+from what the APK actually contains and **fails the release build** on an
+unattributed library.
+
+**3. Landscape content was unreachable.** At 792×363 CSS px with the system font
+scale at 1.5, the main pane held **555 px of content in a 323 px box** and
+clipped the rest — the onboarding card's buttons cut through the middle, and the
+server status, "Open project" and the project list below them reachable by no
+means at all. A responsive override makes that pane scroll (ADR-0033); verified
+after shipping it, with the previously unreachable 232 px scrolled into view.
+
+### Signing
+
+Signing material comes from the environment and **never falls back to the debug
+key** (ADR-0031). An unsigned release fails loudly at install time; a
+debug-signed one installs, looks finished, and can never be upgraded by a
+properly signed build. Verified with a throwaway key kept outside the repository:
+`V3.0 Signer: certificate DN: CN=OpenCode Release Test...`.
+
+### What is NOT done
+
+- **Release signing in CI with real secrets.** The mechanism and workflow snippet
+  are written; no keystore exists for this project, so nothing has been signed in
+  CI. CI does build the release variant unsigned, so the path stays covered.
+- **One layout gap.** The onboarding card's button row clips horizontally at 1.5×
+  font in landscape ("Not yet" is cut mid-word). I could not identify the element
+  reliably — the app renders hidden duplicates that kept matching first — so it
+  is a documented limitation rather than an unverified CSS change.
+- **Bit-for-bit reproducible builds** are not claimed. Nothing is fetched at build
+  time and our own steps embed no timestamps, but AGP metadata and zip ordering
+  are not normalised. `docs/RELEASE.md` §5 says so rather than implying more.
+- **R8 with a real agent turn.** The shrunk build was verified running, but not
+  through the code paths a turn exercises.
 
 ---
 
@@ -503,7 +570,9 @@ meant four defects away from functioning. That distinction is already in
 | **Provider API keys encrypted at rest** | Upstream writes `auth.json` in plaintext at mode 0600; encrypting it forks upstream's auth path. `docs/SECURITY.md` §3. |
 | **Session database at rest** | Unencrypted in the app sandbox. Deferred with `auth.json` — the same decision. |
 | An adversarial app probing the exported Activity / loopback port | The properties were established from the merged manifest and socket measurements, not by installing a hostile app. ASSUMED, not VERIFIED. |
-| Signing and R8 | M11. The release APK is currently unsigned and unshrunk. |
+| Signing in CI with real secrets | The mechanism is built and verified locally with a throwaway key; no project keystore exists. `docs/RELEASE.md` §3. |
+| Bit-for-bit reproducible builds | Not claimed. AGP metadata and zip ordering are not normalised. `docs/RELEASE.md` §5. |
+| The LLVM libc++ licence text | Apache-2.0 §4(a) requires shipping it; network fetching failed behind the proxy and writing it from memory was not acceptable. Blocks public distribution, not building. `docs/LICENSES.md` §6. |
 | Basic auth against a live server | The test server ran unsecured, so no credential entered the source. `createSdkForServer` is upstream code and unchanged. |
 
 ## Recommended next session

@@ -19,7 +19,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | **projects and Git on device; terminals deferred (ADR-0025)** |
 | M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | **in progress — 8/10 device checks pass; 2 need a provider credential** |
 | M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | **in progress — threat review done, 3 findings fixed + 2 documented; `auth.json`, config hardening and the session DB deferred with reasons** |
-| M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | not started |
+| M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | **in progress — signed release runs on hardware; 3 findings fixed; CI signing and one layout gap open** |
 
 `docs/CURRENT_STATUS.md` is authoritative for status. This table is a summary.
 
@@ -410,12 +410,38 @@ the project real.
 7. Accessibility pass.
 
 **Exit criteria**
-- [ ] Signed release APK builds in CI (signing material from CI secrets).
-- [ ] Onboarding works from a clean install.
+- [x] Signed release APK builds (signing material from the environment).
+      *ADR-0031. Verified end to end with a throwaway key: v3-signed, clean
+      install, cold start 234 ms. CI builds the release variant unsigned so the
+      path stays covered without secrets.*
+- [x] Onboarding works from a clean install.
+      *Uninstall → install → launch: the local runtime starts, the server answers
+      401, and the home screen shows `127.0.0.1:4096` connected.*
+- [x] Performance targets recorded.
+      *`docs/RELEASE.md` §7. Cold start 234 ms, runtime ready ~2.8 s, APK 57.7 MB.
+      The runtime's 382 MB PSS is recorded as the number to watch.*
+- [x] User-facing documentation complete.
+      *`docs/INSTALL.md` — requirements, first run, limitations, troubleshooting,
+      attribution. README corrected; it still claimed M1 with no application code.*
+- [x] `CURRENT_STATUS.md` reflects release state.
 - [ ] Full `docs/TEST_MATRIX.md` passes.
-- [ ] Performance targets recorded and met.
-- [ ] User-facing README complete.
-- [ ] `CURRENT_STATUS.md` reflects release state.
+      *One row is 🚫: the onboarding card's button row clips horizontally at 1.5×
+      font in landscape. Documented as a known limitation rather than fixed with
+      an unverified CSS change.*
+- [ ] Release signing in **CI** with real secrets.
+      *The mechanism and the workflow snippet are in `docs/RELEASE.md` §3; no
+      keystore exists for this project yet, so nothing has been signed in CI.*
+- [ ] R8 keep rules exercised by a real agent turn.
+      *R8 is on and the app was verified running, but the code paths a turn
+      exercises have not been through a shrunk build.*
+
+**Found while doing this milestone**
+- A **DEV badge shipped in the release APK** — upstream defaults the channel to
+  `dev` and nothing checked. Found in a screenshot. ADR-0032 now gates it.
+- The APK redistributed **16 third-party libraries with no notice**, two of them
+  copyleft (Git GPL-2.0, libiconv LGPL-2.1). `docs/LICENSES.md` + a build gate.
+- **Landscape content was unreachable** at large font scale: 555 px of content
+  clipped into 323 px with no scroll. ADR-0033.
 
 ---
 

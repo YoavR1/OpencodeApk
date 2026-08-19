@@ -295,6 +295,9 @@ with the vendoring merge and are unmodified.
 | **Release denies cleartext by default** | `scripts/ci/verify-apk.sh` | M10 | ✅ mutation-tested (debug config → FAIL) |
 | The cleartext exception is loopback-only | `scripts/ci/verify-apk.sh` | M10 | ✅ |
 | The packaged launcher does not bind `0.0.0.0` | `scripts/ci/verify-apk.sh` | M10 | ✅ |
+| **Release UI was built for a shipping channel** | `verifyReleaseChannel` (Gradle) | M11 | ✅ mutation-tested (dev bundle → FAIL) |
+| **Every bundled native library is attributed** | `verifyAttribution` (Gradle) | M11 | ✅ mutation-tested (unmapped lib → FAIL) |
+| `NOTICE.txt` is present and current | `collect-licenses.py --check` | M11 | ✅ mutation-tested (missing → exit 1) |
 | APK contains `arm64-v8a` | `scripts/ci/verify-apk.sh` | M7 | ⬜ no native libs yet |
 | Release APK signs and builds | CI | M11 | ⬜ |
 
@@ -331,6 +334,14 @@ Some things only a human with a phone can confirm. Record results in
 | Stored values are opaque on disk | M10 | ✅ ciphertext in `shared_prefs/*.xml` |
 | No secret appears in logcat | M10 | 🟡 0 matches, but this OEM suppresses third-party logs |
 | The device runs the runtime the APK shipped | M10 | ✅ was stale before the fix; `2` after |
+| **Signed release APK installs cleanly on ARM64** | M11 | ✅ v3-signed, `Success`, cold start 234 ms |
+| **R8 + resource shrinking does not break the app** | M11 | ✅ 82.5 → 57.7 MB; runtime started, server 401, UI rendered |
+| **In-place upgrade keeps data** | M11 | ✅ versionCode 11 → 12, no uninstall, session and project intact |
+| Release AAB builds | M11 | ✅ 58.5 MB, both gates ran |
+| Release build is not debuggable | M11 | ✅ `run-as` refused on the release APK |
+| No DEV badge in a release build | M11 | ✅ was present; fixed and re-photographed |
+| Landscape at 1.5× font: content reachable | M11 | ✅ was 555 px clipped to 323 px; now scrolls |
+| Landscape at 1.5× font: onboarding card buttons | M11 | 🚫 **known limitation** — "Not yet" clips horizontally; documented in `docs/INSTALL.md` §5 |
 | **The network security config does NOT constrain the server** | M10 | ✅ restrictive policy installed, Node still reached a public host over cleartext (204) |
 | OpenCode config is writable by the agent | M10 | ✅ persistence/exfiltration vector, documented |
 | Runtime binaries are not writable (W^X) | M10 | ✅ `SandboxPostureTest` |
