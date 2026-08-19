@@ -2,6 +2,7 @@ package ai.opencode.android.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -53,5 +54,19 @@ class RuntimeStateTest {
         val failed: RuntimeState = RuntimeState.Failed("no answer")
         assertFalse(degraded == failed)
         assertFalse(degraded.name == failed.name)
+    }
+
+    @Test
+    fun aliveDistinguishesAProcessThatExistsFromOneThatDoesNot() {
+        // What the controller keys its "may I reuse the last start" decision on.
+        val handle = RuntimeHandle("http://127.0.0.1:4096", "opencode", "secret")
+
+        assertTrue(RuntimeState.Starting.alive)
+        assertTrue(RuntimeState.Ready(handle).alive)
+        assertTrue("degraded means alive but quiet", RuntimeState.Degraded(handle, "quiet").alive)
+
+        assertFalse(RuntimeState.Stopped.alive)
+        assertFalse(RuntimeState.Failed("boom").alive)
+        assertFalse("stopping is on its way out; do not reuse it", RuntimeState.Stopping.alive)
     }
 }

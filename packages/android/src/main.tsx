@@ -215,6 +215,38 @@ function AndroidBackHandlers(props: { back: BackDispatcher }) {
   return null
 }
 
+/**
+ * Reacts to the on-device runtime changing state.
+ *
+ * The host watches the server process and reports what it sees. Two of those
+ * states matter here:
+ *
+ *  - `failed` means the process is gone. Upstream's connection gate would
+ *    eventually show "could not reach" and retry forever against an address
+ *    nothing is listening on, so the runtime is asked to start again instead.
+ *    The password belongs to the process rather than to any one launch, so a
+ *    restart is reconnectable with the handle the UI already has.
+ *  - `degraded` means it is alive but not answering. That often recovers on its
+ *    own, and restarting a server that is merely busy would be worse than
+ *    waiting, so it is reported and left alone.
+ *
+ * The state is also put on the root element, which costs nothing and makes
+ * "what was the runtime doing when this happened" answerable from a screenshot.
+ */
+function trackRuntime(bridge: Bridge, restart: () => void) {
+  let restarting = false
+  return bridge.on("runtime.state", ({ state, reason }) => {
+    document.documentElement.dataset.runtimeState = state
+    if (state === "ready") restarting = false
+    if (state === "degraded") console.warn("[opencode] runtime degraded:", reason ?? "no reason given")
+    if (state !== "failed" || restarting) return
+
+    console.warn("[opencode] runtime failed:", reason ?? "no reason given", "- restarting")
+    restarting = true
+    restart()
+  })
+}
+
 /** Answers the host's back events. */
 function answerBack(bridge: Bridge, back: BackDispatcher) {
   return bridge.on("back", ({ token }) => {
@@ -250,6 +282,7 @@ function AndroidRoot(props: { bridge: Bridge }) {
   onCleanup(trackKeyboard(props.bridge))
   onCleanup(trackLifecycle(props.bridge))
   onCleanup(answerBack(props.bridge, back))
+  onCleanup(trackRuntime(props.bridge, () => void restartRuntime()))
 
   /**
    * The on-device server, if this build has one and it starts.
@@ -258,7 +291,7 @@ function AndroidRoot(props: { bridge: Bridge }) {
    * the app needs no external server. A failure here is not fatal - the app falls
    * back to asking for a remote one - but it is the path that should normally win.
    */
-  const [local] = createResource(async (): Promise<RuntimeHandle | null> => {
+  const [local, { refetch: restartRuntime }] = createResource(async (): Promise<RuntimeHandle | null> => {
     try {
       return await props.bridge.request<RuntimeHandle>({ method: "runtime.await" })
     } catch (error) {

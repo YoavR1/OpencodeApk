@@ -48,6 +48,17 @@ sealed interface RuntimeState {
 
     data object Stopping : RuntimeState
 
+    /**
+     * Whether a server process exists right now.
+     *
+     * `Degraded` counts: the process is alive, it is just not answering, and
+     * restarting a server that is merely busy would be worse than waiting. What
+     * this exists to exclude is `Failed` and `Stopped`, where a start that
+     * completed earlier describes a process that is gone.
+     */
+    val alive: Boolean
+        get() = this is Starting || this is Ready || this is Degraded
+
     /** The name alone, for logs and for the bridge. Never carries the password. */
     val name: String
         get() = when (this) {
@@ -62,6 +73,9 @@ sealed interface RuntimeState {
 
 interface OpencodeRuntime {
     val state: StateFlow<RuntimeState>
+
+    /** True while the server has a session mid-turn. Drives the foreground service. */
+    val busy: StateFlow<Boolean>
 
     /** Starts the server and returns once it answers a health check. */
     suspend fun start(config: RuntimeConfig): RuntimeHandle

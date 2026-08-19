@@ -5,4 +5,10 @@
     <!-- Notification channel shown in Android's per-app notification settings. -->
     <string name="notification_channel_sessions">Sessions</string>
     <string name="notification_channel_sessions_description">Updates about agent sessions, such as a turn finishing while the app is in the background.</string>
+
+    <!-- Shown while the agent is working and the app is in the background. -->
+    <string name="runtime_service_title">OpenCode is working</string>
+    <string name="runtime_service_text">Keeping your session running</string>
+    <string name="runtime_channel_name">Background work</string>
+    <string name="runtime_channel_description">Shown only while an agent turn is running, so Android does not stop it partway through.</string>
 </resources>

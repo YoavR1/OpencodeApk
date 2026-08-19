@@ -17,7 +17,7 @@ Each milestone has a paste-ready prompt in `prompts/`.
 | M6 | Local runtime feasibility spike | `prompts/06_LOCAL_RUNTIME_SPIKE.md` | **complete — the server runs on the phone** |
 | M7 | Local runtime integration | `prompts/07_LOCAL_RUNTIME_INTEGRATION.md` | **the app starts its own server on device** |
 | M8 | Files / terminal / Git | `prompts/08_TERMINAL_FILES_GIT.md` | **projects and Git on device; terminals deferred (ADR-0025)** |
-| M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | not started |
+| M9 | Lifecycle / resilience | `prompts/09_ANDROID_LIFECYCLE.md` | **in progress — 8/10 device checks pass; 2 need a provider credential** |
 | M10 | Security / storage | `prompts/10_SECURITY_STORAGE.md` | not started |
 | M11 | Polish / release | `prompts/11_POLISH_RELEASE.md` | not started |
 
@@ -323,10 +323,26 @@ the project real.
 
 **Exit criteria**
 - [ ] Instrumented test: turn survives backgrounding.
-- [ ] Instrumented test: state recovers after simulated process death.
-- [ ] Rotation does not restart the server (test).
+      *Blocked on a provider credential — a turn is what it needs. The service's
+      idle policy is verified (0 instances while backgrounded); its active path
+      is not.*
+- [x] State recovers after simulated process death.
+      `am kill` (the LMK path) and `am force-stop`: no orphan; reopening restores
+      the session by name and its project. `docs/LIFECYCLE.md` §8, items 7–9.
+- [x] Configuration change does not restart the server.
+      Three configuration changes plus *don't keep activities*: app pid and
+      runtime pid both unchanged. `docs/LIFECYCLE.md` §8, items 2–3.
 - [ ] Network transitions handled without data loss (test).
-- [ ] `CURRENT_STATUS.md` updated.
+      *Not attempted this session. The runtime is on loopback, so a network
+      change cannot break the app↔server link; what is untested is a provider
+      call crossing Wi-Fi↔cellular, which again needs a credential.*
+- [x] `CURRENT_STATUS.md` updated.
+
+**Added beyond the original tasks**
+- A runtime killed out from under the app is detected and restarted
+  (ADR-0026) — the defect that item 10 uncovered.
+- Data integrity under SIGKILL mid-session: WAL-mode SQLite reopened cleanly and
+  the stale lock directory cleared.
 
 ---
 

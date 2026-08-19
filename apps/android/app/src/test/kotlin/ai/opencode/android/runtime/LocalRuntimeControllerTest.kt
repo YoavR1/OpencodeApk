@@ -46,6 +46,7 @@ class LocalRuntimeControllerTest {
         val stops = AtomicInteger(0)
         private val mutable = MutableStateFlow<RuntimeState>(RuntimeState.Stopped)
         override val state: StateFlow<RuntimeState> = mutable.asStateFlow()
+        override val busy = MutableStateFlow(false)
 
         override suspend fun start(config: RuntimeConfig): RuntimeHandle {
             starts.incrementAndGet()
@@ -59,6 +60,16 @@ class LocalRuntimeControllerTest {
         override suspend fun stop() {
             stops.incrementAndGet()
             mutable.value = RuntimeState.Stopped
+        }
+
+        /** The process dying on its own, which is not the same as being stopped. */
+        fun die() {
+            mutable.value = RuntimeState.Failed("killed")
+        }
+
+        fun degrade() {
+            val handle = (mutable.value as RuntimeState.Ready).handle
+            mutable.value = RuntimeState.Degraded(handle, "not answering")
         }
     }
 
@@ -160,6 +171,37 @@ class LocalRuntimeControllerTest {
     }
 
     @Test
+    fun aRuntimeThatDiedIsRestartedRatherThanHandedBackDead() = runBlocking {
+        // Found on a device: `kill -9` the runtime, the renderer notices and asks
+        // again, and the controller returned the completed start - an address
+        // nothing was listening on - without starting anything. A start that
+        // finished describes a process that WAS alive, not one that is.
+        val runtime = FakeRuntime()
+        val subject = controller(runtime)
+
+        subject.awaitReady()
+        runtime.die()
+        subject.awaitReady()
+
+        assertEquals("a dead runtime must be started again", 2, runtime.starts.get())
+    }
+
+    @Test
+    fun aDegradedRuntimeIsNotRestarted() = runBlocking {
+        // The other half of that distinction: a process that is alive but slow to
+        // answer recovers on its own, and killing it to start another would turn
+        // a pause into a lost session.
+        val runtime = FakeRuntime()
+        val subject = controller(runtime)
+
+        subject.awaitReady()
+        runtime.degrade()
+        subject.awaitReady()
+
+        assertEquals("a live-but-degraded runtime must be left alone", 1, runtime.starts.get())
+    }
+
+    @Test
     fun theConfigIsLoopbackOnlyAndAllowsTheWebViewOrigin() = runBlocking {
         // Captured rather than asserted indirectly: binding anything but loopback
         // would expose the server to the network, and omitting the origin would
@@ -168,6 +210,7 @@ class LocalRuntimeControllerTest {
         val runtime = object : OpencodeRuntime {
             private val mutable = MutableStateFlow<RuntimeState>(RuntimeState.Stopped)
             override val state: StateFlow<RuntimeState> = mutable.asStateFlow()
+            override val busy = MutableStateFlow(false)
             override suspend fun start(config: RuntimeConfig): RuntimeHandle {
                 captured = config
                 return RuntimeHandle("http://127.0.0.1:4096", config.username, config.password)

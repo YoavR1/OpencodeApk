@@ -62,11 +62,10 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.web_view)
 
         bridgePort = BridgePort(webView) { message -> bridgeHost.handle(message) }
-        runtime = LocalRuntimeController(
-            context = this,
-            scope = lifecycleScope,
-            versionName = BuildConfig.VERSION_NAME,
-        )
+        // Owned by the process, not by this Activity: a recreation must not mint
+        // a second controller with a second password while the first server is
+        // still running. See OpenCodeApplication.
+        runtime = (application as OpenCodeApplication).runtime
         bridgeHost = BridgeHost(
             activity = this,
             scope = lifecycleScope,

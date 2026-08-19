@@ -207,7 +207,12 @@ export function createBridge(initial?: MessagePort): Bridge {
     attach,
 
     request<T>(request: BridgeRequest): Promise<T> {
-      if (!port) return Promise.reject(new BridgeError("Unavailable", "no Android host bridge in this environment"))
+      // Captured, not read again later: this call belongs to the port that was
+      // current when it was made. If `attach` swaps the port while it is in
+      // flight, `attach` has already rejected it - sending the tail of a call on
+      // a channel its other half never saw would be worse than failing it.
+      const channel = port
+      if (!channel) return Promise.reject(new BridgeError("Unavailable", "no Android host bridge in this environment"))
 
       const id = nextId++
       return new Promise<T>((resolve, reject) => {
@@ -227,7 +232,7 @@ export function createBridge(initial?: MessagePort): Bridge {
           },
         })
 
-        port.postMessage(JSON.stringify({ id, ...request }))
+        channel.postMessage(JSON.stringify({ id, ...request }))
       })
     },
 

@@ -38,10 +38,28 @@ class EmbeddedProcessRuntime(
     private val _state = MutableStateFlow<RuntimeState>(RuntimeState.Stopped)
     override val state: StateFlow<RuntimeState> = _state.asStateFlow()
 
+    private val _busy = MutableStateFlow(false)
+
+    /**
+     * Whether the server currently has a session running.
+     *
+     * Read from the server itself rather than from the UI: the server is the
+     * authority on whether a turn is in flight, and asking it needs no coupling
+     * to upstream's internals and no second signal to keep in sync. It rides on
+     * the health poll that already runs, so it costs no extra wakeups.
+     */
+    override val busy: StateFlow<Boolean> = _busy.asStateFlow()
+
     private var process: Process? = null
     private var watchdog: Job? = null
 
     override suspend fun start(config: RuntimeConfig): RuntimeHandle = withContext(Dispatchers.IO) {
+        // Starting again after a death is a normal path, not a fresh boot: leave
+        // no watchdog watching the previous process and no process behind.
+        watchdog?.cancel()
+        watchdog = null
+        stopProcess()
+        _busy.value = false
         _state.value = RuntimeState.Starting
 
         try {
@@ -62,6 +80,7 @@ class EmbeddedProcessRuntime(
         } catch (error: Throwable) {
             SafeLog.w("runtime failed to start", error)
             stopProcess()
+            _busy.value = false
             _state.value = RuntimeState.Failed(error.message ?: error.javaClass.simpleName)
             throw error
         }
@@ -128,6 +147,10 @@ class EmbeddedProcessRuntime(
         }
 
         SafeLog.d("starting runtime from ${binary.name}")
+        // Note: the child's stdin is a pipe this process holds open and must
+        // never close. The launcher treats EOF on it as "the app is gone" and
+        // shuts down - which is how a server avoids outliving the app whatever
+        // way the app died. Closing process.outputStream would kill the runtime.
         return builder.start()
     }
 
@@ -234,11 +257,16 @@ class EmbeddedProcessRuntime(
                 if (!process.isAlive) {
                     val code = runCatching { process.exitValue() }.getOrNull()
                     SafeLog.w("runtime exited with code $code")
+                    // Clear busy before the state, or a runtime that died
+                    // mid-turn would leave the foreground service - and the
+                    // wakelock behind it - held for the life of the app.
+                    _busy.value = false
                     _state.value = RuntimeState.Failed("the runtime stopped unexpectedly (exit $code)")
                     return@launch
                 }
 
                 val healthy = healthy(handle)
+                _busy.value = healthy && anySessionRunning(handle)
                 val current = _state.value
                 when {
                     healthy && current is RuntimeState.Degraded -> {
@@ -251,6 +279,43 @@ class EmbeddedProcessRuntime(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Whether any session is mid-turn.
+     *
+     * `/session/status` maps session id to status; anything other than idle
+     * means work is in flight. A failure here is reported as "not busy" rather
+     * than assumed busy - holding a foreground service open because a request
+     * failed is the wrong way to be wrong.
+     */
+    private fun anySessionRunning(handle: RuntimeHandle): Boolean =
+        SessionActivity.anyRunning(get(handle, "/session/status"))
+
+    /** Reads a small response body, or null when the request did not succeed. */
+    private fun get(handle: RuntimeHandle, path: String): String? {
+        val connection = runCatching {
+            (URL("${handle.url}$path").openConnection() as HttpURLConnection).apply {
+                connectTimeout = HEALTH_TIMEOUT_MS
+                readTimeout = HEALTH_TIMEOUT_MS
+                requestMethod = "GET"
+                handle.password?.let {
+                    val token = android.util.Base64.encodeToString(
+                        "${handle.username ?: "opencode"}:$it".toByteArray(),
+                        android.util.Base64.NO_WRAP,
+                    )
+                    setRequestProperty("Authorization", "Basic $token")
+                }
+            }
+        }.getOrNull() ?: return null
+
+        return try {
+            if (connection.responseCode in 200..299) connection.inputStream.bufferedReader().readText() else null
+        } catch (error: Exception) {
+            null
+        } finally {
+            runCatching { connection.disconnect() }
         }
     }
 
@@ -285,6 +350,7 @@ class EmbeddedProcessRuntime(
         watchdog?.cancel()
         watchdog = null
         stopProcess()
+        _busy.value = false
         _state.value = RuntimeState.Stopped
     }
 
@@ -312,5 +378,6 @@ class EmbeddedProcessRuntime(
 
         /** `/api/health` first, as desktop does, falling back to the global route. */
         val HEALTH_PATHS = listOf("/api/health", "/global/health")
+
     }
 }

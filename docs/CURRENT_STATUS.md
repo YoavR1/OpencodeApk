@@ -7,15 +7,86 @@
 | | |
 |---|---|
 | **Last updated** | 2026-08-19 |
-| **Session** | M8 projects, terminal, files and Git |
+| **Session** | M9 lifecycle and resilience |
 | **Branch** | `claude/opencode-android-bootstrap-o58939` |
-| **Current milestone** | **M8 — projects and Git work on the device; terminals deferred with evidence** |
-| **Next milestone** | **M9 — lifecycle and resilience** |
-| **Next prompt** | **`prompts/09_ANDROID_LIFECYCLE.md`** |
+| **Current milestone** | **M9 — lifecycle verified on hardware; 8 of 10 checklist items pass, 2 need a provider credential** |
+| **Next milestone** | **M10 — see `docs/IMPLEMENTATION_PLAN.md`** |
+| **Next prompt** | **`prompts/10_*.md`** |
 | **Device** | OnePlus 15 (CPH2747), Android 16 / API 36, arm64-v8a, WebView 150.0.7871.184 |
 
 > **M5 is a checkpoint, not the product** (ADR-0003). The goal is an app that
 > needs no external server. This is not project completion.
+
+---
+
+## M9: the app survives what Android does to it
+
+**VERIFIED on a OnePlus 15 (Android 16), 2026-08-19.** Eight of the ten
+checklist items in `docs/LIFECYCLE.md` pass on hardware; the full table with
+evidence is in §8 of that file.
+
+The three things that changed:
+
+1. **The runtime moved from the Activity to the Application** (ADR-0026). Each
+   `LocalRuntimeController` mints its own per-launch password, so an
+   Activity-owned runtime means a recreation produces a controller whose
+   credential the running server rejects — and an old runtime nobody is watching.
+   Measured: recreation did *not* actually leave two servers, because the
+   renderer's handle survived and nothing asked again. That is luck, and the
+   invariant should not depend on which of two things happens first.
+
+2. **The runtime shuts down on stdin EOF.** Android usually kills the process
+   group with the app — and on this device it does, after both `am force-stop`
+   and `am kill` — but "usually" is not a guarantee across OEMs, and an orphan
+   holds a port and owns a database nobody can talk to.
+
+3. **The foreground service runs only while a turn is in flight** (ADR-0027),
+   driven by the server's own `/session/status` on the health poll that already
+   runs. Twenty minutes backgrounded and idle: **0** `RuntimeService` instances.
+
+### The defect this milestone found
+
+`kill -9` on the runtime, with a session open:
+
+```
+runtime before kill: 27543
+opencode] runtime failed: the runtime stopped unexpectedly (exit 137) - restarting
+runtime after kill:
+```
+
+The watchdog noticed and the renderer asked for a restart — and nothing started.
+`LocalRuntimeController` reused its cached start because it had *completed
+successfully*, which describes a process that was alive when it finished, not one
+that is alive now. It handed back the address of the process that had just died.
+
+Fixed, and re-measured on the same path:
+
+```
+runtime before kill: 27543
+runtime after kill:  28793
+app pid:             23952        <- unchanged; only the runtime restarted
+serving again:       401          <- listening, and still demanding the password
+runtime state attr : ready
+```
+
+`LocalRuntimeControllerTest.aRuntimeThatDiedIsRestartedRatherThanHandedBackDead`
+fails if that predicate is ever loosened again — confirmed by reverting the fix.
+
+### Data integrity under SIGKILL
+
+The case worth testing is a kill *mid-session*, because the runtime keeps SQLite
+in WAL mode and holds a lock directory with a heartbeat. Killed with a 249 KB
+database and a 259 KB WAL open:
+
+- the restart reopened it with no error or lock complaint in `opencode.log`
+- the stale lock directory was gone
+- the session rehydrated in the UI **by name** ("Big Pickle"), with its project
+
+### What is NOT verified
+
+Checklist items 5 and 6 — the notification appearing during a turn and clearing
+afterwards. Both need a real agent turn, which needs a provider credential. The
+*policy* is verified (item 4: nothing is held while idle); the *path* is not.
 
 ---
 
@@ -271,14 +342,18 @@ meant four defects away from functioning. That distinction is already in
 | SSE *delivery* observed end to end | The stream is open and the API works. A server-created session did not appear in the app because sessions are scoped to added projects — not a defect, but not proof of delivery either. |
 | Remote LAN server over HTTP | **Impossible** from this origin (ADR-0021). Needs https or a tunnel. |
 | CI re-run for this work | Local suites are green; CI has not yet run these commits. |
+| Foreground service observed during a turn | Lifecycle items 5 and 6. Needs a provider credential; the idle policy (item 4) is verified. |
 | Basic auth against a live server | The test server ran unsecured, so no credential entered the source. `createSdkForServer` is upstream code and unchanged. |
 
 ## Recommended next session
 
-**M9 — `prompts/09_ANDROID_LIFECYCLE.md`.** The runtime is still owned by the
-Activity, so Android may kill it the moment the app is backgrounded — which means
-a long agent turn is not protected. That is the largest remaining gap between this
-and something usable day to day, and it is what M9 exists for.
+**A real agent turn.** It is now the single largest unverified claim in the
+project, and it blocks the last two lifecycle checklist items as well as the
+end-to-end streaming evidence still outstanding from M5. It needs one provider
+credential entered on the device — the user's budget, which is why no session has
+assumed it. Everything up to the model call is verified.
+
+After that, M10 per `docs/IMPLEMENTATION_PLAN.md`.
 
 *(Superseded plan for M7, kept for context: this is where the*
 runtime gets packaged into the APK as `lib*.so`, started from a foreground

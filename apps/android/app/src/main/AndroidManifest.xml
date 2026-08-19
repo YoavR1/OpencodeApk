@@ -44,6 +44,18 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      FOREGROUND_SERVICE (M9): an agent turn can take minutes, and a backgrounded
+      app is a cached process Android may kill at any moment. This is the only
+      mechanism Android offers to let that work finish.
+
+      dataSync is the honest type: the work is a local server completing a request
+      on the user's behalf. The service runs ONLY while a turn is in flight - see
+      RuntimeService - so it is not a standing cost.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <application
         android:name=".OpenCodeApplication"
         android:allowBackup="false"
@@ -67,6 +79,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".runtime.RuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

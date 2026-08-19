@@ -55,6 +55,9 @@ class LocalRuntimeController(
 
     val state: StateFlow<RuntimeState> get() = runtime.state
 
+    /** True while a turn is in flight; see EmbeddedProcessRuntime.busy. */
+    val busy: StateFlow<Boolean> get() = runtime.busy
+
     private val password: String = UUID.randomUUID().toString()
     private val mutex = Mutex()
     private var starting: Deferred<RuntimeHandle>? = null
@@ -63,7 +66,16 @@ class LocalRuntimeController(
         (runtime.state.value as? RuntimeState.Ready)?.let { return it.handle }
 
         val pending = mutex.withLock {
-            starting?.takeIf { !it.isCompleted || !it.isCancelled } ?: work.async(Dispatchers.IO) {
+            // A completed start describes a process that was alive when it
+            // finished - not one that is alive now. Reusing it after the runtime
+            // died hands the caller a dead address instantly and starts nothing,
+            // which is exactly what happened on the device when the runtime was
+            // killed: the renderer asked to restart and was given the corpse.
+            //
+            // So a cached start is reusable only while it is still running (join
+            // it) or while the process it produced is still there.
+            val reusable = starting?.takeIf { it.isActive || runtime.state.value.alive }
+            reusable ?: work.async(Dispatchers.IO) {
                 runtime.start(
                     RuntimeConfig(
                         // Loopback only. Anything else would expose the server to

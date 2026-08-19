@@ -1076,3 +1076,89 @@ two share the whole toolchain.
 | Q7 | Distribution channel (Play Store, GitHub Releases, F-Droid) | M11 |
 | ~~Q8~~ | ~~`EmbeddedProcessRuntime` vs `EmbeddedInProcessRuntime`~~ | **Resolved — ADR-0022: a separate Node process from `lib*.so`** |
 | ~~Q9~~ | ~~SSE over `fetch` in Android WebView~~ | **Resolved — yes, verified on a device in M5** |
+
+---
+
+## ADR-0026 — The runtime is owned by the process, and a dead one is restarted
+
+**Status:** accepted (M9)
+
+### Context
+
+The runtime was created by `SessionActivity`. Android destroys and recreates an
+Activity for reasons the user never sees — a locale change, a theme change,
+"don't keep activities" — and every `LocalRuntimeController` mints its **own**
+per-launch password. A second controller therefore holds a credential the running
+server does not accept, and the first runtime's watchdog dies with the Activity's
+scope, leaving a server nobody is watching.
+
+Measured on a OnePlus 15 (Android 16), recreation did **not** in fact produce two
+servers: the renderer's handle survived, so nothing asked again. That is luck, not
+design — the invariant held because of which of two things happened first.
+
+### Decision
+
+1. `OpenCodeApplication` owns the runtime. One per process, from first use to
+   process end. The Activity asks for an address; it does not own the thing that
+   provides one.
+2. A cached start is reusable only while it is still running or while the process
+   it produced is still alive (`RuntimeState.alive`). A completed start describes
+   a process that *was* alive, not one that is.
+3. When the host reports `failed`, the renderer asks for the runtime again.
+   `degraded` — alive but not answering — is reported and left alone, because
+   restarting a server that is merely busy turns a pause into a lost session.
+4. The runtime process shuts down on **stdin EOF**. Android usually kills the
+   process group with the app, but "usually" is not a guarantee across OEMs, and
+   an orphan holds a port and owns a database nobody can talk to.
+
+### Consequences
+
+- `EmbeddedProcessRuntime` must never close `process.outputStream`. Closing it
+  would look like tidying up and would kill the runtime.
+- If the server is ever moved to its own `android:process`, `OpenCodeApplication`
+  runs there too and must not start a second runtime.
+
+### Why point 2 is stated so precisely
+
+It was a real defect, found by running it rather than by reading it. `kill -9` on
+the runtime: the watchdog noticed, the renderer asked to restart, and the
+controller handed back the completed start — the address of the process that had
+just died — without starting anything. The UI then sat pointing at nothing.
+`LocalRuntimeControllerTest.aRuntimeThatDiedIsRestartedRatherThanHandedBackDead`
+fails if the predicate is loosened again.
+
+---
+
+## ADR-0027 — The foreground service runs only while a turn is in flight
+
+**Status:** accepted (M9)
+
+### Context
+
+A long agent turn must survive backgrounding, which on modern Android means a
+foreground service (`.claude/rules/android.md` N7). But N9 is equally binding:
+holding a service — and the process it keeps alive — through idle time is a
+defect, not caution.
+
+### Decision
+
+`RuntimeService` is started when the server reports a session mid-turn and stopped
+when it does not. The signal is the server's own `/session/status`, not the UI:
+the server is the authority on whether work is in flight, it needs no coupling to
+upstream's internals, and there is no second signal to keep in sync. The check
+rides on the health poll that already runs every five seconds, so it adds no
+wakeups.
+
+`START_NOT_STICKY`: if Android kills the process mid-turn the turn is already
+lost, and restarting a service with no UI and no work would only burn battery.
+
+An unreadable or unexpected `/session/status` response reads as **not busy** —
+holding the process awake because a request failed is the wrong way to be wrong.
+
+### Consequences
+
+Backgrounding while idle holds nothing; measured on the device as **0**
+`RuntimeService` instances in `dumpsys activity services`. A runtime that dies
+mid-turn clears `busy` before it reports `failed`, or the service would be held
+for the life of the app.
+

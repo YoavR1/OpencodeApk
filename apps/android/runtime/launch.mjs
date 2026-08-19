@@ -55,15 +55,32 @@ try {
 
   // Shut down cleanly when the host asks. Android kills the process group when
   // the app goes away, but a clean stop lets SQLite close its files properly.
-  const shutdown = async () => {
+  let stopping = false
+  const shutdown = async (why) => {
+    if (stopping) return
+    stopping = true
+    emit({ event: "stopping", why })
     try {
       await listener.stop(true)
+    } catch {
+      // Nothing useful to do; the process is going away regardless.
     } finally {
       process.exit(0)
     }
   }
-  process.on("SIGTERM", shutdown)
-  process.on("SIGINT", shutdown)
+  process.on("SIGTERM", () => shutdown("SIGTERM"))
+  process.on("SIGINT", () => shutdown("SIGINT"))
+
+  // The parent's death is the other way this process ends.
+  //
+  // Android usually kills the whole process group along with the app, but
+  // "usually" is not a guarantee, and a server that outlives its app is one
+  // nobody can reach, holding a port and a database nobody can talk to. The host
+  // keeps this pipe open for exactly as long as it is alive, so EOF here means
+  // the app is gone - the one signal that arrives however the app died.
+  process.stdin.on("end", () => shutdown("parent-gone"))
+  process.stdin.on("close", () => shutdown("parent-gone"))
+  process.stdin.resume()
 } catch (error) {
   emit({ event: "error", message: String(error?.stack ?? error?.message ?? error) })
   process.exit(1)

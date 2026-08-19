@@ -11,7 +11,7 @@ whenever the set of tests changes (`.claude/rules/quality.md` Q6).
 
 | Layer | Status |
 |---|---|
-| Android JVM unit tests | ✅ **82 tests**, run in CI by `testDebugUnitTest` |
+| Android JVM unit tests | ✅ **119 tests**, run in CI by `testDebugUnitTest` |
 | Android instrumented tests | ✅ **21 tests, RUN AND PASSING on a OnePlus 15** (M5–M8) — locally, not in CI |
 | Renderer tests | ✅ **98 tests** across 7 files, run in CI by `bun test --cwd packages/android` |
 | Device verification | ✅ **the app runs, connects and streams** — see `docs/CURRENT_STATUS.md` |
@@ -115,6 +115,9 @@ Fast, no device. Run by `./gradlew test`.
 | Network policy | **The release config denies cleartext**, and only debug permits it | M5 | ✅ |
 | Network policy | Cleartext is permitted to loopback and nothing else | M5 | ✅ |
 | Network policy | **Neither config installs a trust anchor** (TLS verification intact) | M5 | ✅ |
+| Runtime lifecycle | **A runtime that died is restarted, not handed back dead** | M9 | ✅ |
+| Runtime lifecycle | A degraded (alive but quiet) runtime is left alone | M9 | ✅ |
+| Runtime lifecycle | `alive` separates a process that exists from one that does not | M9 | ✅ |
 | Server connection | Local `ServerConnection` value construction | M7 | ⬜ |
 | Server connection | Basic-auth header construction | M5 | ⬜ |
 | Credential store | Store/retrieve/delete round-trip | M10 | ⬜ |
@@ -288,7 +291,14 @@ Some things only a human with a phone can confirm. Record results in
 | UI is usable one-handed | M4 | ⬜ |
 | A real agent turn completes on-device | M7 | ⬜ |
 | App survives an overnight background period | M9 | ⬜ |
-| Battery drain is acceptable | M9 | ⬜ |
+| Battery drain is acceptable | M9 | 🟡 **partial** — 20 min backgrounded and idle holds **0** foreground services; an overnight measurement has not been taken |
+| One runtime per process; parent is the app | M9 | ✅ `30697 25646 libnode.so` |
+| Configuration change / *don't keep activities* does not restart the server | M9 | ✅ app and runtime pids unchanged |
+| `am force-stop` and `am kill` leave no orphan runtime | M9 | ✅ no `libnode`; port 4096 returns `000` |
+| Reopening restores the session and its project | M9 | ✅ session "Big Pickle" in project `tmp`, state `ready` |
+| A killed runtime is detected and restarted | M9 | ✅ `27543 → 28793`, app pid unchanged |
+| SIGKILL mid-session does not corrupt the database | M9 | ✅ WAL reopened, stale lock cleared, session rehydrated |
+| Foreground-service notification appears during a turn and clears after | M9 | ⬜ needs a provider credential |
 
 ---
 
